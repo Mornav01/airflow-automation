@@ -3,7 +3,7 @@ GO
 SET QUOTED_IDENTIFIER ON
 GO
 
-CREATE     PROCEDURE [dbo].[sp_run_diff]
+CREATE  OR AlTER   PROCEDURE [dbo].[sp_run_diff]
 (
     @table_name SYSNAME,
     @dump_db SYSNAME,   -- old db
@@ -112,7 +112,7 @@ BEGIN TRY
 	  SET @SQL = '
 SELECT @Cols = STRING_AGG(QUOTENAME(x.name), '','')
 FROM (
-    SELECT c.name, c.column_id
+    SELECT c.name
     FROM ' + QUOTENAME(@NewDB) + '.sys.columns c
     JOIN ' + QUOTENAME(@NewDB) + '.sys.tables t ON c.object_id = t.object_id
     JOIN ' + QUOTENAME(@NewDB) + '.sys.schemas s ON s.schema_id = t.schema_id
@@ -123,7 +123,7 @@ FROM (
 
     INTERSECT
 
-    SELECT c.name, c.column_id
+    SELECT c.name
     FROM ' + QUOTENAME(@OldDB) + '.sys.columns c
     JOIN ' + QUOTENAME(@OldDB) + '.sys.tables t ON c.object_id = t.object_id
     JOIN ' + QUOTENAME(@OldDB) + '.sys.schemas s ON s.schema_id = t.schema_id
