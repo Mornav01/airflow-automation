@@ -1,0 +1,18 @@
+version: "3.8"
+
+services:
+  de-identification-db:
+    image: postgres:15
+    container_name: postgres_deidentification
+    environment:
+      - POSTGRES_DB=deidentification
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    ports:
+      - "6543:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+
+volumes:
+  postgres_data:

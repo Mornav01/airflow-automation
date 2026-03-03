@@ -1,0 +1,326 @@
+version: "3.8"
+
+services:
+  # de-identification-ui:
+  #   container_name: portal_ui
+  #   image: deidentification_portal_ui:${DE_IDENTIFICATION_TAG_UI}
+  #   ports:
+  #     - "${DE_IDENTIFICATION_API_PORT_UI}:3000"
+  #   restart: always
+  
+  de-identification-api:
+    container_name: api
+    image: deidentification_portal:2.0.0
+    ports:
+      - "${DE_IDENTIFICATION_API_PORT}:8000"
+    env_file:
+      - ${DE_IDENTIFICATION_ENV_FILE}
+    command: bash /nd_deployment/run.sh
+    restart: always
+    volumes:
+      - ${SETUP_CONFIG_PATH}:/nd_deployment/setup_config.json
+    depends_on:
+      de-identification-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/auth/login || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  de-identification-notebook:
+    container_name: notebook
+    image: deidentification_portal:2.0.0
+    ports:
+      - "9888:8888"
+    env_file:
+      - ${DE_IDENTIFICATION_ENV_FILE}
+    working_dir: /NOTEBOOK
+    command: jupyter lab --ip=0.0.0.0 --allow-root --no-browser
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - de_identification_notebook:/NOTEBOOK
+    restart: always
+
+  de-identification-db:
+    image: postgres:15
+    container_name: deidentification_db
+    environment:
+      - POSTGRES_DB=${DE_IDENTIFICATION_DB_NAME}
+      - POSTGRES_USER=${DE_IDENTIFICATION_DB_USER}
+      - POSTGRES_PASSWORD=${DE_IDENTIFICATION_DB_PASSWORD}
+    ports:
+      - "6545:5432"
+    volumes:
+      - de_identification_portal_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  de-identification-worker-1:
+    container_name: worker-1
+    image: deidentification_portal:2.0.0
+    env_file:
+      - ${DE_IDENTIFICATION_ENV_FILE}
+    command: python3.10 ./deIdentification/manage.py start_worker
+    restart: always
+    depends_on:
+      de-identification-db:
+        condition: service_healthy
+      de-identification-api:
+        condition: service_healthy
+
+  de-identification-worker-2:
+    container_name: worker-2
+    image: deidentification_portal:2.0.0
+    env_file:
+      - ${DE_IDENTIFICATION_ENV_FILE}
+    command: python3.10 ./deIdentification/manage.py start_worker
+    restart: always
+    depends_on:
+      de-identification-db:
+        condition: service_healthy
+      de-identification-api:
+        condition: service_healthy
+
+  de-identification-worker-3:
+    container_name: worker-3
+    image: deidentification_portal:2.0.0
+    env_file:
+      - ${DE_IDENTIFICATION_ENV_FILE}
+    command: python3.10 ./deIdentification/manage.py start_worker
+    restart: always
+    depends_on:
+      de-identification-db:
+        condition: service_healthy
+      de-identification-api:
+        condition: service_healthy
+
+  de-identification-worker-4:
+    container_name: worker-4
+    image: deidentification_portal:2.0.0
+    env_file:
+      - ${DE_IDENTIFICATION_ENV_FILE}
+    command: python3.10 ./deIdentification/manage.py start_worker
+    restart: always
+    depends_on:
+      de-identification-db:
+        condition: service_healthy
+      de-identification-api:
+        condition: service_healthy
+
+  de-identification-worker-5:
+    container_name: worker-5
+    image: deidentification_portal:2.0.0
+    env_file:
+      - ${DE_IDENTIFICATION_ENV_FILE}
+    command: python3.10 ./deIdentification/manage.py start_worker
+    restart: always
+    depends_on:
+      de-identification-db:
+        condition: service_healthy
+      de-identification-api:
+        condition: service_healthy
+
+  de-identification-worker-6:
+    container_name: worker-6
+    image: deidentification_portal:2.0.0
+    env_file:
+      - ${DE_IDENTIFICATION_ENV_FILE}
+    command: python3.10 ./deIdentification/manage.py start_worker
+    restart: always
+    depends_on:
+      de-identification-db:
+        condition: service_healthy
+      de-identification-api:
+        condition: service_healthy
+
+  de-identification-worker-7:
+    container_name: worker-7
+    image: deidentification_portal:2.0.0
+    env_file:
+      - ${DE_IDENTIFICATION_ENV_FILE}
+    command: python3.10 ./deIdentification/manage.py start_worker
+    restart: always
+    depends_on:
+      de-identification-db:
+        condition: service_healthy
+      de-identification-api:
+        condition: service_healthy
+
+  de-identification-worker-8:
+    container_name: worker-8
+    image: deidentification_portal:2.0.0
+    env_file:
+      - ${DE_IDENTIFICATION_ENV_FILE}
+    command: python3.10 ./deIdentification/manage.py start_worker
+    restart: always
+    depends_on:
+      de-identification-db:
+        condition: service_healthy
+      de-identification-api:
+        condition: service_healthy
+
+  de-identification-worker-9:
+    container_name: worker-9
+    image: deidentification_portal:2.0.0
+    env_file:
+      - ${DE_IDENTIFICATION_ENV_FILE}
+    command: python3.10 ./deIdentification/manage.py start_worker
+    restart: always
+    depends_on:
+      de-identification-db:
+        condition: service_healthy
+      de-identification-api:
+        condition: service_healthy
+
+  de-identification-worker-10:
+    container_name: worker-10
+    image: deidentification_portal:2.0.0
+    env_file:
+      - ${DE_IDENTIFICATION_ENV_FILE}
+    command: python3.10 ./deIdentification/manage.py start_worker
+    restart: always
+    depends_on:
+      de-identification-db:
+        condition: service_healthy
+      de-identification-api:
+        condition: service_healthy
+
+  de-identification-worker-11:
+    container_name: worker-11
+    image: deidentification_portal:2.0.0
+    env_file:
+      - ${DE_IDENTIFICATION_ENV_FILE}
+    command: python3.10 ./deIdentification/manage.py start_worker
+    restart: always
+    depends_on:
+      de-identification-db:
+        condition: service_healthy
+      de-identification-api:
+        condition: service_healthy
+
+  de-identification-worker-12:
+    container_name: worker-12
+    image: deidentification_portal:2.0.0
+    env_file:
+      - ${DE_IDENTIFICATION_ENV_FILE}
+    command: python3.10 ./deIdentification/manage.py start_worker
+    restart: always
+    depends_on:
+      de-identification-db:
+        condition: service_healthy
+      de-identification-api:
+        condition: service_healthy
+
+  de-identification-worker-13:
+    container_name: worker-13
+    image: deidentification_portal:2.0.0
+    env_file:
+      - ${DE_IDENTIFICATION_ENV_FILE}
+    command: python3.10 ./deIdentification/manage.py start_worker
+    restart: always
+    depends_on:
+      de-identification-db:
+        condition: service_healthy
+      de-identification-api:
+        condition: service_healthy
+
+  de-identification-worker-14:
+    container_name: worker-14
+    image: deidentification_portal:2.0.0
+    env_file:
+      - ${DE_IDENTIFICATION_ENV_FILE}
+    command: python3.10 ./deIdentification/manage.py start_worker
+    restart: always
+    depends_on:
+      de-identification-db:
+        condition: service_healthy
+      de-identification-api:
+        condition: service_healthy
+
+  de-identification-worker-15:
+    container_name: worker-15
+    image: deidentification_portal:2.0.0
+    env_file:
+      - ${DE_IDENTIFICATION_ENV_FILE}
+    command: python3.10 ./deIdentification/manage.py start_worker
+    restart: always
+    depends_on:
+      de-identification-db:
+        condition: service_healthy
+      de-identification-api:
+        condition: service_healthy
+
+  de-identification-worker-16:
+    container_name: worker-16
+    image: deidentification_portal:2.0.0
+    env_file:
+      - ${DE_IDENTIFICATION_ENV_FILE}
+    command: python3.10 ./deIdentification/manage.py start_worker
+    restart: always
+    depends_on:
+      de-identification-db:
+        condition: service_healthy
+      de-identification-api:
+        condition: service_healthy
+
+  de-identification-worker-17:
+    container_name: worker-17
+    image: deidentification_portal:2.0.0
+    env_file:
+      - ${DE_IDENTIFICATION_ENV_FILE}
+    command: python3.10 ./deIdentification/manage.py start_worker
+    restart: always
+    depends_on:
+      de-identification-db:
+        condition: service_healthy
+      de-identification-api:
+        condition: service_healthy
+
+  de-identification-worker-18:
+    container_name: worker-18
+    image: deidentification_portal:2.0.0
+    env_file:
+      - ${DE_IDENTIFICATION_ENV_FILE}
+    command: python3.10 ./deIdentification/manage.py start_worker
+    restart: always
+    depends_on:
+      de-identification-db:
+        condition: service_healthy
+      de-identification-api:
+        condition: service_healthy
+
+  de-identification-worker-19:
+    container_name: worker-19
+    image: deidentification_portal:2.0.0
+    env_file:
+      - ${DE_IDENTIFICATION_ENV_FILE}
+    command: python3.10 ./deIdentification/manage.py start_worker
+    restart: always
+    depends_on:
+      de-identification-db:
+        condition: service_healthy
+      de-identification-api:
+        condition: service_healthy
+
+  de-identification-worker-20:
+    container_name: worker-20
+    image: deidentification_portal:2.0.0
+    env_file:
+      - ${DE_IDENTIFICATION_ENV_FILE}
+    command: python3.10 ./deIdentification/manage.py start_worker
+    restart: always
+    depends_on:
+      de-identification-db:
+        condition: service_healthy
+      de-identification-api:
+        condition: service_healthy
+volumes:
+  de_identification_portal_data:
+    external: true
+  de_identification_notebook:
+    external: true

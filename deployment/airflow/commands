@@ -1,0 +1,3 @@
+celery --app airflow.providers.celery.executors.celery_executor flower
+
+celery --app airflow.providers.celery.executors.celery_executor worker --hostname=localhost --loglevel=info

@@ -1,0 +1,20 @@
+{
+    "users_details": [
+        {
+            "user_name": "c1@gmail.com",
+            "password": "rohitpass",
+            "role": "admin"
+        },
+        {
+            "user_name": "c2@gmail.com",
+            "password": "rohitpass",
+            "role": "project_manager"
+        },
+        {
+            "user_name": "c3@gmail.com",
+            "password": "rohitpass",
+            "role": "project_supporter"
+        }
+    ],
+    "setup_completed": true
+}

@@ -1,0 +1,9 @@
+version: "3.8"
+
+services:
+  de-identification-ui:
+    container_name: portal_ui_local
+    image: deidentification_portal:1.0.2
+    ports:
+      - "3002:3000"
+    restart: always
