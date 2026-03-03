@@ -492,6 +492,18 @@ class MergeEngine:
             return
 
         with self.main_engine.begin() as conn:
+            has_pk = conn.execute(text("""
+                SELECT COUNT(*)
+                FROM information_schema.TABLE_CONSTRAINTS
+                WHERE table_schema    = :db
+                  AND table_name      = :tbl
+                  AND constraint_type = 'PRIMARY KEY'
+            """), {"db": self.main_db, "tbl": table}).scalar()
+
+            if not has_pk:
+                self._log(f"No PRIMARY KEY on {table}, skipping DROP")
+                return
+
             conn.execute(text(
                 f"ALTER TABLE `{self.main_db}`.`{table}` DROP PRIMARY KEY"
             ))

@@ -245,10 +245,13 @@ def process_table(table_name, db, state_manager):
         )
 
         state["deidentification"] = {
-            "last_processed_date": datetime.now().isoformat(),
-            "status": "started",   # options: started, completed, failed
+            "last_processed_date": datetime.now().date().isoformat(),
+            "deidentification_status": "started",
             "tasks_created": len(tasks),
-            "chain_id": getattr(chain, "id", None)
+            "rows_count": None,   # populated by state_deid_status_check
+            "chain_id": getattr(chain, "id", None),
+            "is_merged": False,
+            "is_deleted": False,
         }
 
         state_manager.save(table_name, state)
@@ -257,9 +260,11 @@ def process_table(table_name, db, state_manager):
         logging.exception("Failed processing table: %s", table_name)
 
         state["deidentification"] = {
-            "last_processed_date": datetime.now().isoformat(),
-            "status": "failed",    # options: started, completed, failed
-            "error": str(e)
+            "last_processed_date": datetime.now().date().isoformat(),
+            "deidentification_status": "failed",
+            "error": str(e),
+            "is_merged": False,
+            "is_deleted": False,
         }
 
         state_manager.save(table_name, state)
