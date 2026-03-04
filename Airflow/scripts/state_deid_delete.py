@@ -1,11 +1,23 @@
 #!/usr/bin/env python
 """
-DAG 3 — Task 3: Delete Old Diff Data from Deidentified-Diff DB
+DAG 3 — Task 3: Delete Processed Original Data from mobiledoc_diff_merged (MSSQL)
+
+The pipeline flow is:
+    1. Diff + Merge    → accumulates original data into mobiledoc_diff_merged
+    2. Deidentification → reads from mobiledoc_diff_merged and produces deidentified data
+    3. Deid Merge      → merges deidentified data into deidentified_main schema
+    4. THIS SCRIPT     → deletes the now-processed original rows from mobiledoc_diff_merged
+                         so the table does not grow unboundedly
+
+Deletion condition:
+    nd_extracted_date <= last_processed_date
+    (i.e. every row that was already deidentified and merged into the main schema)
 
 For each table in the CSV:
   1. Only run if is_merged = True AND deidentification_status = 'success'
   2. Skip if is_deleted = True
-  3. DELETE FROM <table> WHERE nd_extracted_date <= date(last_processed_date)
+  3. DELETE FROM mobiledoc_diff_merged.<table>
+         WHERE nd_extracted_date <= last_processed_date
   4. On success set is_deleted = True in state
 """
 
@@ -23,10 +35,10 @@ from datetime import datetime
 
 STATE_DIRECTORY = "/Users/ndaicnsarizona/Desktop/production_state_incremental/state"
 
-# Connection to the DEIDENTIFIED-DIFF DB (where rows are deleted)
-DEID_DIFF_CONN = "mysql+pymysql://user:password@localhost:3306/mobiledoc_deidentified_diff"
+# Original accumulated data DB — rows are deleted here after deidentification + merge
+DEID_DIFF_CONN = "mssql+pymssql://sa:ndADMIN2025@localhost:1435/mobiledoc_diff_merged"
 
-# Column in the diff table that holds the extraction date
+# Column that records when each row was extracted into the diff pipeline
 EXTRACTED_DATE_COLUMN = "nd_extracted_date"
 
 # ============================================================
@@ -94,8 +106,8 @@ def delete_old_diff_rows(table_name, cutoff_date, engine):
     import sqlalchemy as sa
 
     sql = sa.text(
-        f"DELETE FROM `{table_name}` "
-        f"WHERE `{EXTRACTED_DATE_COLUMN}` <= :cutoff"
+        f"DELETE FROM [{table_name}] "
+        f"WHERE [{EXTRACTED_DATE_COLUMN}] <= :cutoff"
     )
 
     with engine.begin() as conn:

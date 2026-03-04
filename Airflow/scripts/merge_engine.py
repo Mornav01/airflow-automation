@@ -12,7 +12,20 @@ import numpy as np
 
 BATCH_INSERT_CHUNK = 1000
 
-def sanitize_df(df: pd.DataFrame) -> pd.DataFrame:
+
+def sanitize_df(df):
+    if df.empty:
+        return df
+
+    df = df.astype(object)
+
+    # only normalize pandas missing values
+    df = df.replace({pd.NaT: None, np.nan: None})
+
+    return df
+
+
+'''def sanitize_df(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     df = df.astype(object)
@@ -32,7 +45,7 @@ def sanitize_df(df: pd.DataFrame) -> pd.DataFrame:
     )
     df = df.where(pd.notnull(df), None)
     return df
-
+'''
 
 
 def insert_rows_mysql(conn, db, table, df):
