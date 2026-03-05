@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 CONNECTION_STRING = "mssql+pymssql://sa:ndADMIN2025@localhost:1437/mobiledoc_base_2302"
-TABLES_INPUT_FILE = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/arizona_priority_tables.csv"   # CSV with a 'table_name' column
+TABLES_INPUT_FILE = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/remaining_priority_tabes.csv"   # CSV with a 'table_name' column
 LOG_FILE          = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/state/adhoc/constraint_removal_log_1437_new2.csv"
 # ──────────────────────────────────────────────────────────────────────────────
 

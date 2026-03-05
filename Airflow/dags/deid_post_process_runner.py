@@ -103,7 +103,7 @@ with DAG(
     )
 
     # ──────────────────────────────────────────────
-    # 3️⃣ Delete Old Diff Data
+    # 3️⃣ Delete Old Original DIFFMERGED Data
     # ──────────────────────────────────────────────
 
     def run_deid_delete(**context):
@@ -122,10 +122,10 @@ with DAG(
 
         result = subprocess.run(cmd)
         if result.returncode != 0:
-            raise RuntimeError("Deidentified-diff delete failed")
+            raise RuntimeError("Original DIFFMERGED delete failed")
 
     delete_task = PythonOperator(
-        task_id="delete_deid_diff",
+        task_id="delete_original_diffmerged",
         python_callable=run_deid_delete,
         trigger_rule=TriggerRule.ALL_DONE,  # run even if merge partially failed
     )

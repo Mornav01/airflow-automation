@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 """
-DAG 3 — Task 3: Delete Processed Original Data from mobiledoc_diff_merged (MSSQL)
+DAG 3 — Task 3: Delete Processed Original Data from original_diff_merged (MSSQL)
 
 The pipeline flow is:
-    1. Diff + Merge    → accumulates original data into mobiledoc_diff_merged
-    2. Deidentification → reads from mobiledoc_diff_merged and produces deidentified data
+    1. Diff + Merge    → accumulates original data into original_diff_merged
+    2. Deidentification → reads from original_diff_merged and produces deidentified data
     3. Deid Merge      → merges deidentified data into deidentified_main schema
-    4. THIS SCRIPT     → deletes the now-processed original rows from mobiledoc_diff_merged
+    4. THIS SCRIPT     → deletes the now-processed original rows from original_diff_merged
                          so the table does not grow unboundedly
 
 Deletion condition:
@@ -16,7 +16,7 @@ Deletion condition:
 For each table in the CSV:
   1. Only run if is_merged = True AND deidentification_status = 'success'
   2. Skip if is_deleted = True
-  3. DELETE FROM mobiledoc_diff_merged.<table>
+  3. DELETE FROM original_diff_merged.<table>
          WHERE nd_extracted_date <= last_processed_date
   4. On success set is_deleted = True in state
 """
@@ -98,8 +98,11 @@ class StateManager:
 
 def delete_old_diff_rows(table_name, cutoff_date, engine):
     """
-    Delete rows from the deidentified-diff table where
-    nd_extracted_date <= cutoff_date.
+    Delete processed original rows from original_diff_merged (MSSQL) where
+    nd_extracted_date <= cutoff_date (last_processed_date).
+
+    These rows have already been deidentified and merged into the main
+    deidentified schema, so they are safe to remove from the original DB.
 
     Returns the number of rows deleted.
     """
@@ -127,7 +130,7 @@ def process_table(table_name, state_manager, engine):
     is_merged   = deid.get("is_merged", False)
     is_deleted  = deid.get("is_deleted", False)
 
-    # ── Guard: only run when fully done and merged ────────────
+    # ── Guard: only delete original data once deid + merge are complete ──
     if deid_status != "success" or not is_merged:
         logging.info(
             "[%s] not eligible for delete "
@@ -147,8 +150,9 @@ def process_table(table_name, state_manager, engine):
         logging.warning("[%s] last_processed_date missing → skip", table_name)
         return
 
-    # last_processed_date is already a date string (YYYY-MM-DD)
-    cutoff = last_processed_date   # SQLAlchemy accepts 'YYYY-MM-DD' strings
+    # last_processed_date is a date string (YYYY-MM-DD) — delete all original
+    # rows extracted on or before this date from original_diff_merged
+    cutoff = last_processed_date
 
     # ── Run delete ────────────────────────────────────────────
     logging.info(
@@ -178,7 +182,7 @@ def main():
     parser.add_argument("--tables_filepath", required=True)
     parser.add_argument("--state_dir",       default=STATE_DIRECTORY)
     parser.add_argument("--deid_diff_conn",  default=DEID_DIFF_CONN,
-                        help="SQLAlchemy connection string for the deidentified-diff DB")
+                        help="SQLAlchemy connection string for original_diff_merged (MSSQL original DB)")
     args = parser.parse_args()
 
     setup_logging(args.state_dir)
@@ -189,7 +193,7 @@ def main():
     with open(args.tables_filepath, newline="") as f:
         tables = [row[0].strip() for row in csv.reader(f)]
 
-    logging.info("Running deidentified-diff delete for %d tables", len(tables))
+    logging.info("Deleting processed original data from original_diff_merged for %d tables", len(tables))
 
     state_manager = StateManager(args.state_dir)
 
@@ -205,7 +209,7 @@ def main():
         logging.error("Delete step failed for tables: %s", failed_tables)
         sys.exit(1)
 
-    logging.info("Deidentified-diff delete complete")
+    logging.info("Original data cleanup from original_diff_merged complete")
 
 
 if __name__ == "__main__":
