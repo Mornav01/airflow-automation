@@ -7,7 +7,6 @@ from datetime import timedelta
 
 import pendulum
 from airflow import DAG
-from airflow.providers.standard.operators.bash import BashOperator
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.task.trigger_rule import TriggerRule
 
@@ -80,7 +79,37 @@ with DAG(
     )
 
     # ──────────────────────────────────────────────
-    # 2️⃣ Generate Summary (Always Runs)
+    # 2️⃣ Run Decryption (Always Runs after diff+merge)
+    # ──────────────────────────────────────────────
+
+    def run_decryption(**context):
+        params = context["params"]
+
+        script_path = os.path.abspath(
+            os.path.join(SCRIPT_DIR, "..", "scripts", "state_diff_decryption.py")
+        )
+
+        cmd = [
+            PYTHON_EXECUTABLE,
+            script_path,
+            "--tables_filepath", params["tables_csv"],
+            "--pk_csv",          params["pk_csv"],
+            "--state_dir",       params["state_dir"],
+        ]
+
+        result = subprocess.run(cmd)
+
+        if result.returncode != 0:
+            raise RuntimeError("Decryption step failed")
+
+    decryption_task = PythonOperator(
+        task_id="run_decryption",
+        python_callable=run_decryption,
+        trigger_rule=TriggerRule.ALL_DONE,
+    )
+
+    # ──────────────────────────────────────────────
+    # 3️⃣ Generate Summary (Always Runs)
     # ──────────────────────────────────────────────
 
     def run_summary(**context):
@@ -123,7 +152,7 @@ with DAG(
     )
 
     # ──────────────────────────────────────────────
-    # 3️⃣ Final Validation Task
+    # 4️⃣ Final Validation Task
     # ──────────────────────────────────────────────
 
     def validate_pipeline(**context):
@@ -131,13 +160,15 @@ with DAG(
             task_ids="generate_summary"
         )
 
-        diff_failed = summary.get("diff_failed_today", 0)
-        merge_failed = summary.get("merge_failed_today", 0)
-        
+        diff_failed       = summary.get("diff_failed_today", 0)
+        merge_failed      = summary.get("merge_failed_today", 0)
+        decryption_failed = summary.get("decryption_failed_today", 0)
 
-        if merge_failed > 0 or diff_failed > 0:
+        if diff_failed > 0 or merge_failed > 0 or decryption_failed > 0:
             raise RuntimeError(
-                f"Pipeline failed: {diff_failed} tables failed during diff and {merge_failed} tables failed during merge."
+                f"Pipeline failed: {diff_failed} diff failures, "
+                f"{merge_failed} merge failures, "
+                f"{decryption_failed} decryption failures."
             )
 
         print("Pipeline successful.")
@@ -152,4 +183,4 @@ with DAG(
     # Dependencies
     # ──────────────────────────────────────────────
 
-    run_task >> summary_task >> validate_task
+    run_task >> decryption_task >> summary_task >> validate_task

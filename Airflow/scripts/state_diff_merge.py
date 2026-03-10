@@ -284,6 +284,10 @@ def generate_summary(table_csv, state_dir):
         "merge_success_today": 0,
         "merge_failed_today": 0,
         "skipped_today": 0,
+        # Decryption counters — only populated for tables that have diff_decryption state
+        "decryption_success_today": 0,
+        "decryption_failed_today": 0,
+        "decryption_skipped": 0,
         "details": []
     }
 
@@ -305,12 +309,6 @@ def generate_summary(table_csv, state_dir):
         merge_date = merge.get("last_processed_date")
         merge_success = merge.get("success")
 
-        table_result = {
-            "table": table,
-            "diff": diff,
-            "merge": merge
-        }
-
         summary["total_tables"] += 1
 
         # Diff summary
@@ -329,6 +327,19 @@ def generate_summary(table_csv, state_dir):
 
         if diff_date != today and merge_date != today:
             summary["skipped_today"] += 1
+
+        # Decryption summary — only for tables that have gone through decryption
+        decryption = state.get("diff_decryption")
+        if decryption is not None:
+            dec_date   = decryption.get("last_processed_date")
+            dec_status = decryption.get("status")
+            if dec_date == today:
+                if dec_status == "success":
+                    summary["decryption_success_today"] += 1
+                else:
+                    summary["decryption_failed_today"] += 1
+            else:
+                summary["decryption_skipped"] += 1
 
         #summary["details"].append(table_result)
 
