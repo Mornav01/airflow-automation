@@ -4,14 +4,14 @@ import subprocess
 # ======================================
 # Configuration (override via env vars)
 # ======================================
-LOGS_DB = os.getenv("RESTORE_LOGS_DB", "mobiledoc_latest_2302")
+LOGS_DB = os.getenv("RESTORE_LOGS_DB", "mobiledoc_latest")
 SQLCMD_CONTAINER = os.getenv("SQLCMD_CONTAINER", "3ba288f6db819c8fecb5a7344b68aa474e0574eb408d9a29308f7963963fb02d")
 SQL_SERVER_CONTAINER = os.getenv("SQL_SERVER_CONTAINER", "localhost")
 SA_USER = os.getenv("SA_USER", "sa")
 SA_PASS = os.getenv("SA_PASS", "ndADMIN2025")
 SQLCMD_BIN = os.getenv("SQLCMD_BIN", "/opt/mssql-tools18/bin/sqlcmd")
 BAK_DIR = os.getenv("BAK_DIR", "/var/opt/mssql/dump/Full")  # folder inside container containing .bak files
-STANDBY_FILE = os.getenv("STANDBY_FILE", "/var/opt/mssql/undo/mobiledoc_latest2302_standby.undo")
+# STANDBY_FILE = os.getenv("STANDBY_FILE", "/var/opt/mssql/undo/mobiledoc_latest2302_standby.undo")
 DRY_RUN = os.getenv("RESTORE_DRY_RUN", "0").lower() in ("1", "true", "yes")
 
 
@@ -68,9 +68,15 @@ def restore_bak_file(bak_file: str, dry_run: bool = False) -> None:
     print(f"{action_label}: {bak_file}")
 
     sql = (
-        f"RESTORE DATABASE [{LOGS_DB}] "
-        f"FROM DISK = N'{bak_file}' "
-        f"WITH REPLACE, STANDBY = N'{STANDBY_FILE}';"
+    f"RESTORE DATABASE [{LOGS_DB}] "
+    f"FROM DISK = N'{bak_file}' "
+    f"WITH MOVE 'MultiSpec_10056_July2011' "
+    f"TO '/var/opt/mssql/data/{LOGS_DB}.mdf', "
+    f"MOVE 'MultiSpec_10056_July2011_log' "
+    f"TO '/var/opt/mssql/data/{LOGS_DB}_log.ldf', "
+    f"REPLACE, "
+    f"NORECOVERY, "
+    f"STATS = 5;"
     )
 
     if dry_run:
@@ -87,6 +93,22 @@ def restore_bak_file(bak_file: str, dry_run: bool = False) -> None:
 
 
 if __name__ == "__main__":
+
+    # Drop database if exists
+    run_sqlcmd(
+        f"""
+        use master;
+        IF DB_ID('{LOGS_DB}') IS NOT NULL
+        BEGIN
+            ALTER DATABASE [{LOGS_DB}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+            DROP DATABASE [{LOGS_DB}];
+        END
+        """
+    )
+
+    # Recreate database
+    run_sqlcmd(f"CREATE DATABASE [{LOGS_DB}];")
+
     # Set SINGLE_USER mode before restoring
     run_sqlcmd(f"ALTER DATABASE [{LOGS_DB}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;")
 
@@ -100,6 +122,8 @@ if __name__ == "__main__":
     print(f"Latest .bak file selected: {latest_bak}")
 
     restore_bak_file(latest_bak, dry_run=DRY_RUN)
+
+    run_sqlcmd(f"RESTORE DATABASE [{LOGS_DB}] WITH RECOVERY;")
 
     # Set MULTI_USER mode after restoring
     run_sqlcmd(f"ALTER DATABASE [{LOGS_DB}] SET MULTI_USER WITH ROLLBACK IMMEDIATE;")

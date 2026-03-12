@@ -13,7 +13,7 @@ from datetime import datetime
 
 STATE_DIRECTORY = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/state/manual_deid_runner/"
 
-BASE_REPO_DIR = "/Users/ndaicnsarizona/Desktop/deidenmtification_polars/deidentification_v2/"
+BASE_REPO_DIR = "/Users/ndaicnsarizona/Desktop/deidentification_polars_2/deidentification_v2/"
 
 DJANGO_PROJECT_DIR = os.path.join(BASE_REPO_DIR, "deIdentification")
 sys.path.insert(0, DJANGO_PROJECT_DIR)
@@ -32,9 +32,10 @@ from worker.models import Task
 # ===================== PARALLEL CONFIG ======================
 # ============================================================
 
-LARGE_TABLE_THRESHOLD = 4_000_000   # ID-range size above which → parallel
-PARALLEL_TASKS_COUNT  = 4           # parallel sub-tasks for large tables
+#LARGE_TABLE_THRESHOLD = 4_000_000   # ID-range size above which → parallel
+#PARALLEL_TASKS_COUNT  = 4           # parallel sub-tasks for large tables
 
+RECORDS_PER_TASK = 1_000_000   # 1 task per 1M rows
 # ============================================================
 # ===================== LOGGING ==============================
 # ============================================================
@@ -197,8 +198,7 @@ def process_table(table_name, db, csv_writer):
         tasks, chain = create_deidentification_tasks_parallel(
             table_obj=table_obj,
             delete_table=True,
-            num_parallel=PARALLEL_TASKS_COUNT,
-            large_table_threshold=LARGE_TABLE_THRESHOLD,
+            records_per_task=RECORDS_PER_TASK
         )
 
         logging.info("Created %d tasks for %s", len(tasks), table_name)
@@ -241,7 +241,7 @@ def main():
     )
     parser.add_argument(
         "--tables_filepath",
-        default="/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/remaining_priority_tabes.csv",
+        default="/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/tables_deid_test.csv",
     )
 
     args = parser.parse_args()

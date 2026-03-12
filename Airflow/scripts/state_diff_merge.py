@@ -157,7 +157,7 @@ class SkipLogic:
 # ============================================================
 
 def run_diff_step(table):
-    from diff_prodedure_execution import DiffService
+    from diff_procedure_execution import DiffService
 
     return DiffService.run_diff(
         core_conn_str=BASE_DB,
