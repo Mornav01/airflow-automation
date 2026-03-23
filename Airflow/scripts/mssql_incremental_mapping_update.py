@@ -8,12 +8,13 @@ import json
 from datetime import datetime, date
 from pathlib import Path
 
+from db_config import STATE_DIR
 
 # ---------- CONFIG ----------
 MSSQL_CONN = {
     "server": "localhost",
     "port": 1437,
-    "database": "mobiledoc_latest_2302",
+    "database": "mobiledoc_latest",
     "user": "sa",
     "password": "ndADMIN2025"
 }
@@ -26,7 +27,7 @@ MYSQL_CONN = {
 }
 CREATED_BY = "system"
 
-STATE_DIRECTORY = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/state/mapping_master"
+STATE_DIRECTORY = os.path.join(STATE_DIR, "mapping_master")
 
 
 

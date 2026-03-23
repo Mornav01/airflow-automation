@@ -22,19 +22,19 @@ from datetime import datetime
 # ===================== CONFIG ===============================
 # ============================================================
 
-STATE_DIRECTORY = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/state"
-
 # db_type for merge_engine (must be 'mysql' for deidentified schema)
 DB_TYPE = "mysql"
 
-# Connection to the DEIDENTIFIED staging DB (source for this merge)
-DEID_MAIN_CONN = "mysql+pymysql://ndadmin:ndADMIN%402025@localhost:3306/deidentified_mobiledoc_base"
+from db_config import MYSQL_DEID_BASE_CONN, MYSQL_DEID_STAGING_CONN, MYSQL_DEID_DIFFMERGED_CONN, STATE_DIR
 
+# Connection to the DEIDENTIFIED main DB (destination for this merge)
+DEID_MAIN_CONN = MYSQL_DEID_BASE_CONN
 
-# Connection to the DEIDENTIFIED diff staging DB
-DEID_DIFF_STAGING_CONN = "mysql+pymysql://ndadmin:ndADMIN%402025@localhost:3306/deidentified_mobiledoc_diff_staging"
+# Connection to the DEIDENTIFIED diff staging DB (source for this merge)
+DEID_DIFF_STAGING_CONN = MYSQL_DEID_STAGING_CONN
 
-DEID_DIFF_MERGED_CONN = "mysql+pymysql://ndadmin:ndADMIN%402025@localhost:3306/deidentified_mobiledoc_diff_merged"
+# Connection to the DEIDENTIFIED diff merged DB
+DEID_DIFF_MERGED_CONN = MYSQL_DEID_DIFFMERGED_CONN
 
 
 # PK CSV used by the merge engine
@@ -191,10 +191,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--tables_filepath", required=True)
     parser.add_argument("--pk_csv",          default=PK_CSV)
-    parser.add_argument("--state_dir",       default=STATE_DIRECTORY)
     args = parser.parse_args()
 
-    setup_logging(args.state_dir)
+    setup_logging(STATE_DIR)
 
     pk_map = load_pk_map(args.pk_csv)
 
@@ -203,7 +202,7 @@ def main():
 
     logging.info("Running deidentified merge for %d tables", len(tables))
 
-    state_manager = StateManager(args.state_dir)
+    state_manager = StateManager(STATE_DIR)
 
     failed_tables = []
     for table in tables:

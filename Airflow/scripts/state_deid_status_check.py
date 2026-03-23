@@ -26,17 +26,16 @@ from datetime import datetime
 # ===================== CONFIG ===============================
 # ============================================================
 
-STATE_DIRECTORY = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/state"
-
 BASE_REPO_DIR = "/Users/ndaicnsarizona/Desktop/deidenmtification_polars/deidentification_v2/"
 DJANGO_PROJECT_DIR = os.path.join(BASE_REPO_DIR, "deIdentification")
 
+from db_config import MSSQL_DIFFMERGED_CONN, MYSQL_DEID_STAGING_CONN, STATE_DIR
+
 # Connection to the SOURCE table (diff-merged DB — input to deidentification)
-DEID_SOURCE_CONN = "mssql+pymssql://sa:ndADMIN2025@localhost:1437/mobiledoc_base_2302"
-#mobiledoc_diff_merged
-# Connection to the DEIDENTIFIED output table
-DEID_OUTPUT_CONN = "mysql+pymysql://ndadmin:ndADMIN%402025@localhost:3306/deidentified_mobiledoc_base"
-#deidentified_mobiledoc_diff_staging
+DEID_SOURCE_CONN = MSSQL_DIFFMERGED_CONN
+
+# Connection to the DEIDENTIFIED output table (diff staging — output of deidentification workers)
+DEID_OUTPUT_CONN = MYSQL_DEID_STAGING_CONN
 ROW_COUNT_TOLERANCE = 0.10   # 10 %
 
 # ============================================================
@@ -113,7 +112,7 @@ def get_row_count(conn_str, table_name):
     Uses dialect-aware identifier quoting ([...] for MSSQL, `...` for MySQL).
     """
     import sqlalchemy as sa
-    engine = sa.create_engine(conn_str)
+    engine = sa.create_engine(conn_str, pool_pre_ping=True)
     quoted = engine.dialect.identifier_preparer.quote(table_name)
     with engine.connect() as conn:
         result = conn.execute(sa.text(f"SELECT COUNT(*) FROM {quoted}"))
@@ -219,10 +218,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dbdetailsmodel_name", required=True)
     parser.add_argument("--tables_filepath",      required=True)
-    parser.add_argument("--state_dir",            default=STATE_DIRECTORY)
     args = parser.parse_args()
 
-    setup_logging(args.state_dir)
+    setup_logging(STATE_DIR)
 
     try:
         db = DbDetailsModel.objects.get(db_name=args.dbdetailsmodel_name)
@@ -235,7 +233,7 @@ def main():
 
     logging.info("Checking deidentification status for %d tables", len(tables))
 
-    state_manager = StateManager(args.state_dir)
+    state_manager = StateManager(STATE_DIR)
 
     for table in tables:
         process_table(table, db, state_manager)

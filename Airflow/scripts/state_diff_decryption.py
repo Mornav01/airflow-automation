@@ -2,16 +2,22 @@
 """
 Diff Decryption Script
 
-Runs AFTER merge_engine. For each table in the CSV that has a registered
+Runs AFTER state_diff_merge. For each table in the CSV that has a registered
 decryption function:
 
   1. Skip if table is NOT in DECRYPTION_REGISTRY
-  2. Skip if diff + merge are not both successful (not ready)
-  3. Skip if diff_decryption already succeeded today
-  4. Run the table-specific decryption function
-     → reads from DIFF_STAGING_CONN, writes decrypted rows to DIFF_STAGING_CONN
-  5. Merge decrypted staging table into BASE_CONN via merge_engine
-  6. Save state["diff_decryption"] with status + row counts
+  2. Skip if diff_decryption already succeeded today (decryption step)
+     → reads ALL encrypted rows from DIFF_MERGED_CONN (accumulated by state_diff_merge)
+     → writes decrypted rows to DIFF_STAGING_CONN as {table}_decryptfinal
+     → saves state with is_merged=False, is_deleted=False
+  3. Skip if is_merged=True (merge step)
+     → merges {table}_decryptfinal (DIFF_STAGING_CONN) into BASE_CONN and
+       accumulates {table}_decryptfinal snapshot into DIFF_MERGED_CONN
+  4. Skip if is_deleted=True (delete step)
+     → deletes rows from DIFF_MERGED_CONN.{table}
+       WHERE nd_extracted_date <= last_processed_date
+     → cutoff is last_processed_date (not today), so a merge failure on a
+       previous run never causes premature deletion
 
 State written per table (state/<table>.json):
   {
@@ -21,7 +27,9 @@ State written per table (state/<table>.json):
       "last_processed_date": "2026-03-06",
       "status": "success" | "failed",
       "rows_decrypted": 19481,
-      "is_merged": true
+      "is_merged": true,
+      "is_deleted": true,
+      "rows_deleted": 19481
     }
   }
 
@@ -55,15 +63,15 @@ from tqdm import tqdm
 
 STATE_DIRECTORY = "/Users/ndaicnsarizona/Desktop/production_state_incremental/state"
 
-# Source: read encrypted rows from diff_staging
+# Source: read encrypted rows from diff_merged
 # Destination: write decrypted table back into the same diff_staging DB (new table name)
-DIFF_STAGING_CONN = "mssql+pymssql://sa:ndADMIN2025@localhost:1437/mobiledoc_diff_staging"
+DIFF_STAGING_CONN = "mssql+pyodbc://sa:ndADMIN2025@127.0.0.1:1437/mobiledoc_diff_staging?driver=ODBC+Driver+17+for+SQL+Server"
 
 # Merge step 1: merge decrypted table into base
-BASE_CONN = "mssql+pymssql://sa:ndADMIN2025@localhost:1437/mobiledoc_base_2302"
+BASE_CONN = "mssql+pyodbc://sa:ndADMIN2025@127.0.0.1:1437/mobiledoc_base_2302?driver=ODBC+Driver+17+for+SQL+Server"
 
 # Merge step 2: accumulate merged snapshot into diff_merged
-DIFF_MERGED_CONN = "mssql+pymssql://sa:ndADMIN2025@localhost:1437/mobiledoc_diff_merged"
+DIFF_MERGED_CONN = "mssql+pyodbc://sa:ndADMIN2025@127.0.0.1:1437/mobiledoc_diff_merged?driver=ODBC+Driver+17+for+SQL+Server"
 
 PK_CSV = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/arizona_primary_keys.csv"
 
@@ -71,6 +79,9 @@ HISTORICAL_DATA_DEFAULT_DATE = "2026-02-23 00:00:00"
 
 DECRYPT_BATCH_SIZE = 1000
 DECRYPT_MAX_WORKERS = 10
+
+# Column stamped on every row when it is extracted into the diff pipeline
+EXTRACTED_DATE_COLUMN = "nd_extracted_date"
 
 # ============================================================
 # ============== TABLE REGISTRY & NAME MAPPING ===============
@@ -152,13 +163,6 @@ class StateManager:
 # ============================================================
 # ===================== SKIP LOGIC ===========================
 # ============================================================
-
-def is_diff_merge_complete(state):
-    """Both diff and merge must have succeeded (any date)."""
-    return (
-        state.get("diff", {}).get("success") is True
-        and state.get("merge", {}).get("success") is True
-    )
 
 def is_decryption_done_today(state):
     """Decryption already succeeded today → skip."""
@@ -371,6 +375,31 @@ def run_merge_step(table, pk_cols, source_conn, dest_conn, diffmerged_conn):
         }
 
 # ============================================================
+# ===================== DELETE STEP ==========================
+# ============================================================
+
+def delete_decrypted_source_rows(table_name, cutoff_date, diff_merged_engine):
+    """
+    Delete rows from mobiledoc_diff_merged.{table_name} where
+    nd_extracted_date <= cutoff_date (the date decryption ran).
+
+    These rows have been fully decrypted and merged, so they are safe to
+    remove from diff_merged to prevent unbounded growth.
+
+    Returns the number of rows deleted.
+    """
+    from sqlalchemy import text as sa_text
+
+    sql = sa_text(
+        f"DELETE FROM [{table_name}] "
+        f"WHERE [{EXTRACTED_DATE_COLUMN}] <= :cutoff"
+    )
+    with diff_merged_engine.begin() as conn:
+        result = conn.execute(sql, {"cutoff": cutoff_date})
+        return result.rowcount
+
+
+# ============================================================
 # ===================== CORE LOGIC ===========================
 # ============================================================
 
@@ -381,18 +410,8 @@ def process_table(table_name, state_manager, pk_map):
         logging.debug("[%s] not in DECRYPTION_REGISTRY, skipping", table_name)
         return
 
-    state = state_manager.load(table_name)
+    state     = state_manager.load(table_name)
     dec_state = state.get("diff_decryption", {})
-
-    # ── 2. Diff + Merge must be complete ─────────────────────
-    if not is_diff_merge_complete(state):
-        logging.info("[%s] diff/merge not complete → skip decryption", table_name)
-        return
-
-    # ── 3. Skip if already done today ────────────────────────
-    if is_decryption_done_today(state):
-        logging.info("[%s] decryption already succeeded today → skip", table_name)
-        return
 
     dest_table_name = TABLE_NAME_MAPPING.get(table_name, f"{table_name}_decrypted")
     decrypt_fn      = DECRYPTION_REGISTRY[table_name]
@@ -400,58 +419,95 @@ def process_table(table_name, state_manager, pk_map):
 
     today = date.today().isoformat()
 
-    # ── 4. Run decryption ─────────────────────────────────────
-    logging.info("[%s] starting decryption → dest table: %s", table_name, dest_table_name)
+    # ── 2. Run decryption (skip if already succeeded today) ──
+    if is_decryption_done_today(state):
+        logging.info("[%s] decryption already succeeded today → skip", table_name)
+    else:
+        logging.info("[%s] starting decryption → dest table: %s", table_name, dest_table_name)
 
-    source_engine = create_engine(DIFF_STAGING_CONN)
-    dest_engine   = create_engine(DIFF_STAGING_CONN)
+        # Source: read ALL encrypted rows from diff_merged (accumulated by state_diff_merge)
+        # Dest:   write decrypted rows into diff_staging as {table}_decryptfinal
+        source_engine = create_engine(DIFF_MERGED_CONN)
+        dest_engine   = create_engine(DIFF_STAGING_CONN)
 
-    try:
-        rows_decrypted = decrypt_fn(source_engine, dest_engine, table_name, dest_table_name)
+        try:
+            rows_decrypted = decrypt_fn(source_engine, dest_engine, table_name, dest_table_name)
 
-        dec_state = {
-            "last_processed_date": today,
-            "status":              "decrypted",
-            "rows_decrypted":      rows_decrypted,
-            "is_merged":           False,
-        }
-        state["diff_decryption"] = dec_state
-        state_manager.save(table_name, state)
+            dec_state = {
+                "last_processed_date": today,
+                "status":              "success",
+                "rows_decrypted":      rows_decrypted,
+                "is_merged":           False,
+                "is_deleted":          False,
+            }
+            state["diff_decryption"] = dec_state
+            state_manager.save(table_name, state)
 
-    except Exception:
-        logging.exception("[%s] decryption failed", table_name)
-        state["diff_decryption"] = {
-            "last_processed_date": today,
-            "status":              "failed",
-            "error":               traceback.format_exc(),
-        }
-        state_manager.save(table_name, state)
+        except Exception:
+            logging.exception("[%s] decryption failed", table_name)
+            state["diff_decryption"] = {
+                "last_processed_date": today,
+                "status":              "failed",
+                "error":               traceback.format_exc(),
+                "is_merged":           False,
+                "is_deleted":          False,
+            }
+            state_manager.save(table_name, state)
+            return
+
+    # ── 3. Merge decrypted data into base (skip if is_merged=True) ──
+    if dec_state.get("is_merged"):
+        logging.info("[%s] is_merged=True → skip merge", table_name)
+    else:
+        logging.info("[%s] merging '%s' into base", table_name, dest_table_name)
+
+        merge_result = run_merge_step(
+            table=dest_table_name,
+            pk_cols=pk_cols,
+            source_conn=DIFF_STAGING_CONN,
+            dest_conn=BASE_CONN,
+            diffmerged_conn=DIFF_MERGED_CONN,
+        )
+
+        if merge_result.get("success"):
+            logging.info(
+                "[%s] merge succeeded → updated=%d new=%d",
+                table_name,
+                merge_result.get("updated_rows", 0),
+                merge_result.get("new_rows", 0),
+            )
+            dec_state["is_merged"]    = True
+            dec_state["updated_rows"] = merge_result.get("updated_rows", 0)
+            dec_state["new_rows"]     = merge_result.get("new_rows", 0)
+            state["diff_decryption"]  = dec_state
+            state_manager.save(table_name, state)
+        else:
+            logging.error("[%s] merge failed: %s", table_name, merge_result.get("error"))
+            dec_state["merge_error"] = merge_result.get("error")
+            state["diff_decryption"] = dec_state
+            state_manager.save(table_name, state)
+            return
+
+    # ── 4. Delete source rows from diff_merged (skip if is_deleted=True) ──
+    if dec_state.get("is_deleted"):
+        logging.info("[%s] is_deleted=True → skip delete", table_name)
         return
 
-    # ── 5. Merge decrypted data into base ─────────────────────
-    logging.info("[%s] merging '%s' into base", table_name, dest_table_name)
-
-    merge_result = run_merge_step(
-        table=dest_table_name,
-        pk_cols=pk_cols,
-        source_conn=DIFF_STAGING_CONN,
-        dest_conn=BASE_CONN,
-        diffmerged_conn=DIFF_MERGED_CONN,
+    cutoff = dec_state.get("last_processed_date")
+    logging.info(
+        "[%s] deleting rows from diff_merged.%s where %s <= %s",
+        table_name, table_name, EXTRACTED_DATE_COLUMN, cutoff,
     )
 
-    if merge_result.get("success"):
-        logging.info(
-            "[%s] merge succeeded → updated=%d new=%d",
-            table_name,
-            merge_result.get("updated_rows", 0),
-            merge_result.get("new_rows", 0),
-        )
-        dec_state["is_merged"] = True
-        dec_state["status"]    = "success"
-    else:
-        logging.error("[%s] merge into base failed: %s", table_name, merge_result.get("error"))
-        dec_state["status"]      = "failed"
-        dec_state["merge_error"] = merge_result.get("error")
+    diff_merged_engine = create_engine(DIFF_MERGED_CONN)
+    try:
+        rows_deleted = delete_decrypted_source_rows(table_name, cutoff, diff_merged_engine)
+        logging.info("[%s] deleted %d rows from diff_merged", table_name, rows_deleted)
+        dec_state["is_deleted"]      = True
+        dec_state["rows_deleted"]    = rows_deleted
+    except Exception:
+        logging.exception("[%s] source deletion failed", table_name)
+        dec_state["delete_error"] = traceback.format_exc()
 
     state["diff_decryption"] = dec_state
     state_manager.save(table_name, state)

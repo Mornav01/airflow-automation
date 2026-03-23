@@ -9,12 +9,12 @@ from pathlib import Path
 import pandas as pd
 from sqlalchemy import create_engine, text
 
+from db_config import STATE_DIR
 
-
-MSSQL_CONN_STR = "mssql+pymssql://sa:ndADMIN2025@localhost:1437/mobiledoc_latest_2302"
+MSSQL_CONN_STR = "mssql+pymssql://sa:ndADMIN2025@localhost:1437/mobiledoc_latest"
 MYSQL_CONN_STR = "mysql+pymysql://root:ndADMIN%402025@localhost:3306/master_sep"
 
-STATE_DIRECTORY = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/state/mapping_master"
+STATE_DIRECTORY = os.path.join(STATE_DIR, "mapping_master")
 
 
 # ============================================================

@@ -29,3 +29,5 @@ Airflow/airflow-webserver.pid
 
 state/*
 input/*
+.env
+

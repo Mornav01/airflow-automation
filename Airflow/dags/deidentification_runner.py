@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import subprocess
 from datetime import timedelta
 
@@ -17,16 +18,18 @@ from airflow.task.trigger_rule import TriggerRule
 
 local_tz = pendulum.timezone("Asia/Kolkata")
 
-BASE_REPO_DIR = "/Users/ndaicnsarizona/Desktop/deidentification/"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.abspath(os.path.join(SCRIPT_DIR, "..", "scripts")))
+
+from db_config import STATE_DIR  # noqa: E402  # type: ignore[import-untyped]
 
 PYTHON_EXECUTABLE = os.environ.get("AIRFLOW_PYTHON", "python")
 
-STATE_BASE_DIR = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/state/"
+MAPPING_MASTER_STATE_DIR = os.path.join(STATE_DIR, "mapping_master")
 
-MAPPING_STATE_FILE = os.path.join(STATE_BASE_DIR, "mapping_master/mapping_update_state.json")
-PII_STATE_FILE     = os.path.join(STATE_BASE_DIR, "mapping_master/pii_data_state.json")
-MASTER_STATE_FILE  = os.path.join(STATE_BASE_DIR, "mapping_master/master_insurance_state.json")
+MAPPING_STATE_FILE = os.path.join(MAPPING_MASTER_STATE_DIR, "mapping_update_state.json")
+PII_STATE_FILE     = os.path.join(MAPPING_MASTER_STATE_DIR, "pii_data_state.json")
+MASTER_STATE_FILE  = os.path.join(MAPPING_MASTER_STATE_DIR, "master_insurance_state.json")
 
 default_args = {
     "owner": "airflow",
@@ -53,13 +56,13 @@ with DAG(
         "master_insurance_sql_file": "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/Airflow/scripts/sql/master_insurance_query_ecw.sql",
         # Deidentification params
         "num_workers":          5,
-        "dbdetailsmodel_name":  "arizona_mobiledoc_nov_diff",
-        "tables_filepath":      "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/tables_deid_test.csv",
+        "dbdetailsmodel_name":  "arizona_mobiledoc_incremental",
+        "tables_filepath":      "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/test.csv",
     },
 ) as dag:
 
     # ──────────────────────────────────────────────
-    # 1️⃣ Run Mapping Master Jobs
+    # Run Mapping Master Jobs
     # ──────────────────────────────────────────────
 
     def run_mapping_jobs(**context):
@@ -98,7 +101,7 @@ with DAG(
     )
 
     # ──────────────────────────────────────────────
-    # 2️⃣ Validate Mapping State Files
+    # Validate Mapping State Files
     # ──────────────────────────────────────────────
 
     def validate_mapping_master(**_):
@@ -133,29 +136,15 @@ with DAG(
         python_callable=validate_mapping_master,
         trigger_rule=TriggerRule.ALL_DONE,
     )
-
     # ──────────────────────────────────────────────
-    # 3️⃣ Close Existing Screen Sessions
-    # ──────────────────────────────────────────────
-
-    close_screen_script = os.path.abspath(
-        os.path.join(SCRIPT_DIR, "..", "scripts", "close_screen_sessions.sh")
-    )
-
-    close_screen_sessions = BashOperator(
-        task_id="close_screen_sessions",
-        bash_command=f"bash {close_screen_script} ",  # trailing space prevents Jinja template file lookup
-    )
-
-    # ──────────────────────────────────────────────
-    # 4️⃣ Run Deidentification Task Creation
+    # Run Deidentification Task Creation
     # ──────────────────────────────────────────────
 
     def run_deid(**context):
         params = context["params"]
 
         run_script = os.path.abspath(
-            os.path.join(SCRIPT_DIR, "..", "scripts", "state_deidentification_run.py")
+            os.path.join(SCRIPT_DIR, "..", "scripts", "state_deidentification_run_polar.py")
         )
 
         cmd = [
@@ -176,11 +165,11 @@ with DAG(
     )
 
     # ──────────────────────────────────────────────
-    # 5️⃣ Start Workers
+    # Start Workers
     # ──────────────────────────────────────────────
 
     start_workers_script = os.path.abspath(
-        os.path.join(SCRIPT_DIR, "..", "scripts", "start_workers_1.sh")
+        os.path.join(SCRIPT_DIR, "..", "scripts", "start_workers_terminal.sh")
     )
 
     start_workers = BashOperator(
@@ -192,4 +181,4 @@ with DAG(
     # Dependencies
     # ──────────────────────────────────────────────
 
-    run_mapping_task >> validate_mapping_task >> close_screen_sessions >> run_deid_task >> start_workers
+    run_mapping_task >> validate_mapping_task >> run_deid_task >> start_workers

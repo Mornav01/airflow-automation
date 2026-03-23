@@ -33,10 +33,10 @@ from datetime import datetime
 # ===================== CONFIG ===============================
 # ============================================================
 
-STATE_DIRECTORY = "/Users/ndaicnsarizona/Desktop/production_state_incremental/state"
+from db_config import MSSQL_DIFFMERGED_CONN, STATE_DIR
 
 # Original accumulated data DB — rows are deleted here after deidentification + merge
-DEID_DIFF_CONN = "mssql+pymssql://sa:ndADMIN2025@localhost:1435/mobiledoc_diff_merged"
+DEID_DIFF_CONN = MSSQL_DIFFMERGED_CONN
 
 # Column that records when each row was extracted into the diff pipeline
 EXTRACTED_DATE_COLUMN = "nd_extracted_date"
@@ -180,22 +180,19 @@ def process_table(table_name, state_manager, engine):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--tables_filepath", required=True)
-    parser.add_argument("--state_dir",       default=STATE_DIRECTORY)
-    parser.add_argument("--deid_diff_conn",  default=DEID_DIFF_CONN,
-                        help="SQLAlchemy connection string for original_diff_merged (MSSQL original DB)")
     args = parser.parse_args()
 
-    setup_logging(args.state_dir)
+    setup_logging(STATE_DIR)
 
     import sqlalchemy as sa
-    engine = sa.create_engine(args.deid_diff_conn)
+    engine = sa.create_engine(DEID_DIFF_CONN)
 
     with open(args.tables_filepath, newline="") as f:
         tables = [row[0].strip() for row in csv.reader(f)]
 
     logging.info("Deleting processed original data from original_diff_merged for %d tables", len(tables))
 
-    state_manager = StateManager(args.state_dir)
+    state_manager = StateManager(STATE_DIR)
 
     failed_tables = []
     for table in tables:

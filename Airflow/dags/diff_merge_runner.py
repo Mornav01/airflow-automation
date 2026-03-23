@@ -38,7 +38,7 @@ with DAG(
     default_args=default_args,
     tags=["diff_merge"],
     params={
-        "tables_csv": "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/arizona_priority_tables.csv",
+        "tables_csv": "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/arizona_pt_for_diffmergedecrypt.csv",
         "pk_csv": "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/arizona_primary_keys.csv",
         "state_dir": "/Users/ndaicnsarizona/Desktop/production_state_incremental/state",
     },

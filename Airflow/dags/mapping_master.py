@@ -25,19 +25,11 @@ default_args = {
     "retry_delay": timedelta(minutes=5),
 }
 
-STATE_BASE_DIR = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/state/"
+MAPPING_MASTER_STATE_DIR = os.path.join(os.environ["STATE_DIR"], "mapping_master")
 
-MAPPING_STATE_FILE = os.path.join(
-    STATE_BASE_DIR, "mapping_master/mapping_update_state.json"
-)
-
-PII_STATE_FILE = os.path.join(
-    STATE_BASE_DIR, "mapping_master/pii_data_state.json"
-)
-
-MASTER_STATE_FILE = os.path.join(
-    STATE_BASE_DIR, "mapping_master/master_insurance_state.json"
-)
+MAPPING_STATE_FILE = os.path.join(MAPPING_MASTER_STATE_DIR, "mapping_update_state.json")
+PII_STATE_FILE     = os.path.join(MAPPING_MASTER_STATE_DIR, "pii_data_state.json")
+MASTER_STATE_FILE  = os.path.join(MAPPING_MASTER_STATE_DIR, "master_insurance_state.json")
 
 # ──────────────────────────────────────────────
 # DAG

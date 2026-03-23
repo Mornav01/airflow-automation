@@ -12,11 +12,10 @@ from datetime import datetime
 # ===================== DJANGO SETUP =========================
 # ============================================================
 
-STATE_DIRECTORY = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/state"
+from db_config import STATE_DIR, DEID_REPO_DIR
 
-BASE_REPO_DIR = "/Users/ndaicnsarizona/Desktop/deidenmtification_polars/deidentification_v2/"
-
-DJANGO_PROJECT_DIR = os.path.join(BASE_REPO_DIR, "deIdentification")
+STATE_DIRECTORY   = STATE_DIR
+DJANGO_PROJECT_DIR = os.path.join(DEID_REPO_DIR, "deIdentification")
 sys.path.insert(0, DJANGO_PROJECT_DIR)
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "deIdentification.settings")
@@ -33,8 +32,7 @@ from worker.models import Task
 # ===================== PARALLEL CONFIG ======================
 # ============================================================
 
-LARGE_TABLE_THRESHOLD = 4_000_000   # ID-range size above which → parallel
-PARALLEL_TASKS_COUNT  = 4           # parallel sub-tasks for large tables
+RECORDS_PER_TASK = 1_000_000   # 1 task per 1M rows
 
 
 # ============================================================
@@ -234,8 +232,7 @@ def process_table(table_name, db, state_manager):
         tasks, chain = create_deidentification_tasks_parallel(
             table_obj=table_obj,
             delete_table=True,
-            num_parallel=PARALLEL_TASKS_COUNT,
-            large_table_threshold=LARGE_TABLE_THRESHOLD,
+            records_per_task=RECORDS_PER_TASK,
         )
 
         logging.info(

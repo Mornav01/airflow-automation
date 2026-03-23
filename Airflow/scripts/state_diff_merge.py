@@ -30,11 +30,11 @@ STATE_DIRECTORY = "/Users/ndaicnsarizona/Desktop/production_state_incremental/st
 TABLE_CSV = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/arizona_priority_tables.csv"
 PK_CSV = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/arizona_primary_keys.csv"
 
-BASE_DB = "mssql+pymssql://sa:ndADMIN2025@localhost:1437/mobiledoc_base_2302"
-PROD_DB = "mssql+pymssql://sa:ndADMIN2025@localhost:1437/mobiledoc_latest_2302"
-DIFF_STAGING_DB = "mssql+pymssql://sa:ndADMIN2025@localhost:1437/mobiledoc_diff_staging"
+BASE_DB = "mssql+pyodbc://sa:ndADMIN2025@127.0.0.1:1437/mobiledoc_base_2302?driver=ODBC+Driver+17+for+SQL+Server"
+PROD_DB = "mssql+pyodbc://sa:ndADMIN2025@127.0.0.1:1437/mobiledoc_latest?driver=ODBC+Driver+17+for+SQL+Server"
+DIFF_STAGING_DB = "mssql+pyodbc://sa:ndADMIN2025@127.0.0.1:1437/mobiledoc_diff_staging?driver=ODBC+Driver+17+for+SQL+Server"
 DB_TYPE = "mssql"
-DIFFMERGED_CONN = "mssql+pymssql://sa:ndADMIN2025@localhost:1435/mobiledoc_diff_merged"
+DIFFMERGED_CONN = "mssql+pyodbc://sa:ndADMIN2025@127.0.0.1:1437/mobiledoc_diff_merged?driver=ODBC+Driver+17+for+SQL+Server"
 
 HISTORICAL_DATA_DEFAULT_DATE = "2026-02-23 00:00:00"
 
@@ -76,15 +76,12 @@ class StateManager:
     def load(self, table):
         path = self._file_path(table)
         if not os.path.exists(path):
-            return {
-                "diff": {},
-                "merge": {}
-        }
+            return {"diff": {}, "merge": {}}
         with open(path, "r") as f:
-            return json.load(f)
-        
+            state = json.load(f)
         state.setdefault("diff", {})
         state.setdefault("merge", {})
+        return state
 
     def save(self, table, state):
         path = self._file_path(table)
