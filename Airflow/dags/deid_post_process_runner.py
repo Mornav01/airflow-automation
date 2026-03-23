@@ -38,8 +38,7 @@ with DAG(
     tags=["deid"],
     params={
         "dbdetailsmodel_name": "arizona_mobiledoc_incremental",
-        "tables_filepath": "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/test.csv",
-        "pk_csv": "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/arizona_primary_keys.csv",
+        "tables_filepath": "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/test.csv"
     },
 ) as dag:
 
@@ -85,8 +84,7 @@ with DAG(
         cmd = [
             PYTHON_EXECUTABLE,
             script_path,
-            "--tables_filepath", params["tables_filepath"],
-            "--pk_csv",          params["pk_csv"],
+            "--tables_filepath", params["tables_filepath"]
         ]
 
         result = subprocess.run(cmd)

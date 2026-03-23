@@ -25,11 +25,10 @@ from datetime import datetime
 # ============================================================
 # ===================== CONFIG ===============================
 # ============================================================
-
-BASE_REPO_DIR = "/Users/ndaicnsarizona/Desktop/deidenmtification_polars/deidentification_v2/"
-DJANGO_PROJECT_DIR = os.path.join(BASE_REPO_DIR, "deIdentification")
-
+from db_config import DEID_REPO_DIR
 from db_config import MSSQL_DIFFMERGED_CONN, MYSQL_DEID_STAGING_CONN, STATE_DIR
+
+DJANGO_PROJECT_DIR = os.path.join(DEID_REPO_DIR, "deIdentification")
 
 # Connection to the SOURCE table (diff-merged DB — input to deidentification)
 DEID_SOURCE_CONN = MSSQL_DIFFMERGED_CONN

@@ -14,6 +14,10 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 STATE_DIR     = os.environ["STATE_DIR"]
 DEID_REPO_DIR = os.environ["DEID_REPO_DIR"]
 
+# ── Merge config ────────────────────────────────────────────────
+PK_CSV                      = os.environ["PK_CSV"]
+HISTORICAL_DATA_DEFAULT_DATE = os.environ["HISTORICAL_DATA_DEFAULT_DATE"]
+
 # ── MSSQL ──────────────────────────────────────────────────────
 MSSQL_BASE_CONN         = os.environ["MSSQL_BASE_CONN"]
 MSSQL_PROD_CONN         = os.environ["MSSQL_PROD_CONN"]

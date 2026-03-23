@@ -25,7 +25,10 @@ from datetime import datetime
 # db_type for merge_engine (must be 'mysql' for deidentified schema)
 DB_TYPE = "mysql"
 
-from db_config import MYSQL_DEID_BASE_CONN, MYSQL_DEID_STAGING_CONN, MYSQL_DEID_DIFFMERGED_CONN, STATE_DIR
+from db_config import (
+    MYSQL_DEID_BASE_CONN, MYSQL_DEID_STAGING_CONN, MYSQL_DEID_DIFFMERGED_CONN,
+    STATE_DIR, PK_CSV, HISTORICAL_DATA_DEFAULT_DATE,
+)
 
 # Connection to the DEIDENTIFIED main DB (destination for this merge)
 DEID_MAIN_CONN = MYSQL_DEID_BASE_CONN
@@ -35,12 +38,6 @@ DEID_DIFF_STAGING_CONN = MYSQL_DEID_STAGING_CONN
 
 # Connection to the DEIDENTIFIED diff merged DB
 DEID_DIFF_MERGED_CONN = MYSQL_DEID_DIFFMERGED_CONN
-
-
-# PK CSV used by the merge engine
-PK_CSV = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/arizona_primary_keys.csv"
-
-HISTORICAL_DATA_DEFAULT_DATE = "2026-02-23 00:00:00"
 # ============================================================
 # ===================== LOGGING ==============================
 # ============================================================
