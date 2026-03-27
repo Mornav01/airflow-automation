@@ -10,12 +10,15 @@ Usage:
     python generate_project_summary.py --state_dir /path/to/state --failed_only
 """
 
+import csv
 import os
 import json
 import argparse
 from datetime import date
 
-STATE_DIRECTORY = "/Users/ndaicnsarizona/Desktop/production_state_incremental/state"
+from db_config import STATE_DIR
+
+STATE_DIRECTORY = STATE_DIR
 
 
 def load_all_states(state_dir):
@@ -185,11 +188,47 @@ def print_summary(summary, failed_only=False):
         print("  No failures.")
 
 
+def flatten_state(table, state):
+    """Flatten a table's nested state JSON into a single dict for CSV export."""
+    row = {"table": table}
+    if "_load_error" in state:
+        row["_load_error"] = state["_load_error"]
+        return row
+
+    for section in ("diff", "merge", "deidentification", "diff_decryption"):
+        data = state.get(section, {})
+        for key, val in data.items():
+            row[f"{section}__{key}"] = val
+
+    return row
+
+
+def export_csv(states, csv_path):
+    rows = [flatten_state(table, state) for table, state in states.items()]
+
+    # Collect all column names (preserving order: table first, then all keys)
+    all_keys = ["table"]
+    seen = {"table"}
+    for row in rows:
+        for k in row:
+            if k not in seen:
+                all_keys.append(k)
+                seen.add(k)
+
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=all_keys, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+
+    print(f"CSV written to: {csv_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate consolidated project summary from state files")
-    parser.add_argument("--state_dir", default=STATE_DIRECTORY, help="Path to state directory")
-    parser.add_argument("--json",        action="store_true", help="Output raw JSON instead of formatted text")
-    parser.add_argument("--failed_only", action="store_true", help="Only print failure sections")
+    parser.add_argument("--state_dir",  default=STATE_DIRECTORY, help="Path to state directory")
+    parser.add_argument("--json",        action="store_true",     help="Output raw JSON instead of formatted text")
+    parser.add_argument("--failed_only", action="store_true",     help="Only print failure sections")
+    parser.add_argument("--csv", default="/Users/ndaicnsarizona/Desktop/production_state_incremental/state/summary/summary.csv", help="Export per-table CSV to this path")
     args = parser.parse_args()
 
     today = date.today().isoformat()
@@ -200,6 +239,8 @@ def main():
         print(json.dumps(summary, indent=4))
     else:
         print_summary(summary, failed_only=args.failed_only)
+
+    export_csv(states, args.csv)
 
 
 if __name__ == "__main__":

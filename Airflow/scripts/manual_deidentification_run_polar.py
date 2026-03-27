@@ -241,7 +241,7 @@ def main():
     )
     parser.add_argument(
         "--tables_filepath",
-        default="/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/arizona_pt_for_deiden.csv",
+        default="/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/tables.csv",
     )
 
     args = parser.parse_args()

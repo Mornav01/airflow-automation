@@ -49,7 +49,9 @@ def _raw_bulk_insert(engine: Engine, table: str, df: pd.DataFrame,
         placeholders = ",".join(["%s" for _ in cols])
         sql          = f"INSERT INTO `{db}`.`{table}` ({col_sql}) VALUES ({placeholders})"
 
-    rows      = [tuple(r) for r in df.itertuples(index=False, name=None)]
+    rows      = [tuple(v.to_pytimedelta() if isinstance(v, pd.Timedelta) else v
+                       for v in r)
+                 for r in df.itertuples(index=False, name=None)]
     total     = len(rows)
     n_batches = (total + chunk - 1) // chunk
 
