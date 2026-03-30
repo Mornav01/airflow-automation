@@ -107,6 +107,10 @@ def copy_latest_backup(latest_bak: Path):
 
     dest_file = LOCAL_DEST_ROOT / latest_bak.name
 
+    if dest_file.exists() and dest_file.stat().st_size == latest_bak.stat().st_size:
+        logger.info(f"Destination file already exists with the same size ({latest_bak.stat().st_size} bytes). Skipping copy.")
+        return dest_file
+
     logger.info(f"Copying backup: {latest_bak} -> {dest_file}")
 
     shutil.copy2(latest_bak, dest_file)
