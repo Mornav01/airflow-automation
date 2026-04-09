@@ -31,3 +31,4 @@ state/*
 input/*
 .env
 
+deid_runtime/

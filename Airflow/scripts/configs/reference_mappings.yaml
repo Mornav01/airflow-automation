@@ -1,0 +1,69 @@
+# Reference mapping join conditions per table.
+# Each table key maps to a JoinCondition that resolves an indirect patient/encounter ID
+# by walking a chain of reference tables in the source database.
+#
+# Structure:
+#   <table_name>:
+#     source_table: <table being deidentified>
+#     destination_column: <column name to resolve (e.g. PatientId)>
+#     destination_column_type: patient_id | encounter_id
+#     conditions:
+#       - source_column: <column in current table to join from>
+#         reference_table: <table to look up>
+#         column_name: <join key in the reference table>
+#
+# Multi-hop example: add more entries under conditions in order.
+
+edi_inv_cpt:
+  source_table: edi_inv_cpt
+  destination_column: PatientId
+  destination_column_type: patient_id
+  conditions:
+    - source_column: InvoiceId
+      reference_table: edi_invoice
+      column_name: Id
+
+edi_inv_diagnosis:
+  source_table: edi_inv_diagnosis
+  destination_column: PatientId
+  destination_column_type: patient_id
+  conditions:
+    - source_column: InvoiceId
+      reference_table: edi_invoice
+      column_name: Id
+
+hcfa:
+  source_table: hcfa
+  destination_column: PatientId
+  destination_column_type: patient_id
+  conditions:
+    - source_column: InvId
+      reference_table: edi_invoice
+      column_name: Id
+
+hl7labdatadetail:
+  source_table: hl7labdatadetail
+  destination_column: EncounterId
+  destination_column_type: encounter_id
+  conditions:
+    - source_column: ReportId
+      reference_table: labdata
+      column_name: ReportId
+
+hl7labnotes:
+  source_table: hl7labnotes
+  destination_column: EncounterId
+  destination_column_type: encounter_id
+  conditions:
+    - source_column: reportid
+      reference_table: labdata
+      column_name: ReportId
+
+edi_inv_insurance:
+  source_table: edi_inv_insurance
+  destination_column: PatientId
+  destination_column_type: patient_id
+  conditions:
+    - source_column: InvoiceId
+      reference_table: edi_invoice
+      column_name: Id

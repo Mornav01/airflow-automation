@@ -1,0 +1,166 @@
+combine:
+  patientfullname:
+    combine:
+    - ufname
+    - uminitial
+    - ulname
+    masking_value: ((PATIENTNAME))
+    processing_func: null
+    regex: null
+dob:
+  users_dob:
+    masking_value: ((PatientDOB))
+  users_ptDob:
+    masking_value: ((PatientDOB))
+mask:
+  users_ssn:
+    masking_value: ((PatientSSN))
+    min_length: 2
+  users_upwd:
+    masking_value: ((PatientDetail))
+    min_length: 2
+  users_uname:
+    masking_value: ((PatientDetail))
+    min_length: 2
+  users_uemail:
+    masking_value: ((PatientEmail))
+    min_length: 2
+  users_ufname:
+    masking_value: ((PatientName))
+    min_length: 2
+  users_ulname:
+    masking_value: ((PatientName))
+    min_length: 2
+  users_upcity:
+    masking_value: ((PatientCity))
+    min_length: 2
+  patients_GrId:
+    masking_value: ((PatientDetail))
+    min_length: 2
+  patients_city:
+    masking_value: ((City))
+    min_length: 2
+  users_upPhone:
+    masking_value: ((PatientPhone))
+    min_length: 2
+  patients_insId:
+    masking_value: ((InsuranceDetails))
+    min_length: 2
+  users_initials:
+    masking_value: ((PatientName))
+    min_length: 2
+  users_upagerno:
+    masking_value: ((PatientPhone))
+    min_length: 2
+  patients_insId2:
+    masking_value: ((InsuranceDetails))
+    min_length: 2
+  users_uminitial:
+    masking_value: ((PatientName))
+    min_length: 2
+  users_umobileno:
+    masking_value: ((PatientPhone))
+    min_length: 2
+  users_upaddress:
+    masking_value: ((PatientAddress))
+    min_length: 2
+  patients_insname:
+    masking_value: ((InsuranceDetails))
+    min_length: 2
+  users_upaddress2:
+    masking_value: ((PatientAddress))
+    min_length: 2
+  patients_inscopay:
+    masking_value: ((InsuranceDetails))
+    min_length: 2
+  patients_insname2:
+    masking_value: ((InsuranceDetails))
+    min_length: 2
+  patients_inscopay2:
+    masking_value: ((InsuranceDetails))
+    min_length: 2
+  patients_insgroupno:
+    masking_value: ((InsuranceDetails))
+    min_length: 2
+  patients_straddress:
+    masking_value: ((Address))
+    min_length: 2
+  users_upreviousname:
+    masking_value: ((PatientName))
+    min_length: 2
+  patients_insgroupno2:
+    masking_value: ((InsuranceDetails))
+    min_length: 2
+  patients_strAddress2:
+    masking_value: ((Address))
+    min_length: 2
+  patients_employercity:
+    masking_value: ((EmployerDetails))
+    min_length: 2
+  patients_employername:
+    masking_value: ((EmployerName))
+    min_length: 2
+  patients_employerPhone:
+    masking_value: ((EmployerDetails))
+    min_length: 2
+  patients_preferred_name:
+    masking_value: ((PatientName))
+    min_length: 2
+  patients_employeraddress:
+    masking_value: ((EmployerDetails))
+    min_length: 2
+  patients_inssubscriberno:
+    masking_value: ((InsuranceDetails))
+    min_length: 2
+  patients_employeraddress2:
+    masking_value: ((EmployerDetails))
+    min_length: 2
+  patients_inssubscriberno2:
+    masking_value: ((InsuranceDetails))
+    min_length: 2
+regex:
+  ssn:
+    masking_value: ((SSN))
+    processing_func: null
+    regex:
+    - \b\d{3}[- ]\d{2}[- ]\d{4}\b
+  uemail:
+    masking_value: ((EMAIL))
+    processing_func: null
+    regex:
+    - \b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b
+  upPhone:
+    masking_value: ((PHONENUMBER))
+    processing_func: null
+    regex:
+    - \(\d{3}\)\s*\d{3}-\d{4}
+    - \b\d{3}-\d{3}-\d{4}\b
+    - \+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b
+    - \b\d{3} \d{3} \d{4}\b
+  upagerno:
+    masking_value: ((PHONENUMBER))
+    processing_func: null
+    regex:
+    - \(\d{3}\)\s*\d{3}-\d{4}
+    - \b\d{3}-\d{3}-\d{4}\b
+    - \+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b
+    - \b\d{3} \d{3} \d{4}\b
+  umobileno:
+    masking_value: ((PHONENUMBER))
+    processing_func: null
+    regex:
+    - \(\d{3}\)\s*\d{3}-\d{4}
+    - \b\d{3}-\d{3}-\d{4}\b
+    - \+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b
+    - \b\d{3} \d{3} \d{4}\b
+  employerPhone:
+    masking_value: ((PHONENUMBER))
+    processing_func: null
+    regex:
+    - \(\d{3}\)\s*\d{3}-\d{4}
+    - \b\d{3}-\d{3}-\d{4}\b
+    - \+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b
+    - \b\d{3} \d{3} \d{4}\b
+replace_value:
+- new_value: ((FACILITYNAME))
+  old_value: Arizona

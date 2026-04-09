@@ -1,0 +1,4 @@
+# Place your deid v2 config.yaml and tables.csv here.
+# Example files:
+#   config.yaml   — deid v2 config (source_db, destination_db, config_key, state_db_path, ...)
+#   tables.csv    — one table name per line

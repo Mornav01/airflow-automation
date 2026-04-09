@@ -5,6 +5,7 @@ import logging
 import sys
 import os
 import json
+import random
 from datetime import datetime, date
 from pathlib import Path
 
@@ -133,8 +134,12 @@ def run_etl(sql_file_path):
             nd_pid = max_patient_id
             patient_map[pid] = nd_pid
 
+            offset = random.choice([
+                random.randint(-38, -30),
+                random.randint(30, 38)
+            ])
             new_patients.append((
-                nd_pid, pid, 0, rdate, None,
+                nd_pid, pid, offset, rdate, None,
                 CREATED_BY, datetime.now(), CREATED_BY, datetime.now()
             ))
         else:

@@ -36,7 +36,7 @@ from nd_api.models import DbDetailsModel, IgnoreRowsDeIdentificaiton
 
 INPUT_CSV = os.path.join(
     os.path.dirname(__file__),
-    "arizona_row_count_stats_20260326_041332.csv",
+    "row_count_stats_20260406_043114.csv",
 )
 
 TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
