@@ -9,23 +9,11 @@ import random
 from datetime import datetime, date
 from pathlib import Path
 
-from db_config import STATE_DIR
+from db_config import STATE_DIR, MAPPING_MSSQL_CONN, MAPPING_MYSQL_CONN
 
 # ---------- CONFIG ----------
-MSSQL_CONN = {
-    "server": "localhost",
-    "port": 1437,
-    "database": "mobiledoc_latest",
-    "user": "sa",
-    "password": "ndADMIN2025"
-}
-
-MYSQL_CONN = {
-    "host": "localhost",
-    "database": "mapping_sep",
-    "user": "ndadmin",
-    "password": "ndADMIN@2025"
-}
+MSSQL_CONN = MAPPING_MSSQL_CONN
+MYSQL_CONN  = MAPPING_MYSQL_CONN
 CREATED_BY = "system"
 
 STATE_DIRECTORY = os.path.join(STATE_DIR, "mapping_master")

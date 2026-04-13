@@ -14,9 +14,17 @@ from airflow.task.trigger_rule import TriggerRule
 # Config
 # ──────────────────────────────────────────────
 
+import sys
+
 local_tz = pendulum.timezone("Asia/Kolkata")
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.abspath(os.path.join(SCRIPT_DIR, "..", "scripts")))
+
+from db_config import (  # noqa: E402
+    MAPPING_SQL_FILE, MASTER_PII_SQL_FILE, MASTER_INSURANCE_SQL_FILE,
+)
+
 PYTHON_EXECUTABLE = os.environ.get("AIRFLOW_PYTHON", "python")
 
 default_args = {
@@ -44,9 +52,9 @@ with DAG(
     default_args=default_args,
     tags=["mapping", "master"],
     params={
-        "mapping_sql_file": "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/Airflow/scripts/sql/mapping_ecw.sql",
-        "master_pii_sql_file": "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/Airflow/scripts/sql/master_pii_data_table_ecw.sql",
-        "master_insurance_sql_file": "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/Airflow/scripts/sql/master_insurance_query_ecw.sql"
+        "mapping_sql_file":          MAPPING_SQL_FILE,
+        "master_pii_sql_file":       MASTER_PII_SQL_FILE,
+        "master_insurance_sql_file": MASTER_INSURANCE_SQL_FILE,
     },
 ) as dag:
 
@@ -59,7 +67,7 @@ with DAG(
 
         # --- 1. Mapping Update ---
         mapping_script = os.path.abspath(
-            os.path.join(SCRIPT_DIR, "..", "scripts", "mssql_incremental_mapping_update.py")
+            os.path.join(SCRIPT_DIR, "..", "scripts", "mssql_incremental_mapping_update_activeflag.py")
         )
 
         subprocess.run(

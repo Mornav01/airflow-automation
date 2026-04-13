@@ -6,37 +6,17 @@ import logging
 from datetime import date
 import traceback
 
+from db_config import (
+    BASE_DB, PROD_DB, DIFF_STAGING_DB, DIFFMERGED_CONN,
+    DB_TYPE,
+    STATE_DIR, HISTORICAL_DATA_DEFAULT_DATE,
+)
+
 # ============================================================
 # ===================== DEFAULT CONFIG =======================
 # ============================================================
 
-'''
-
-STATE_DIRECTORY = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/state"
-TABLE_CSV = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/tables.csv"
-PK_CSV = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/arizona_primary_keys.csv"
-
-BASE_DB = "mssql+pymssql://sa:ndADMIN2025@localhost:1435/mobiledoc_nov_22_11"
-PROD_DB = "mssql+pymssql://sa:ndADMIN2025@localhost:1435/mobiledoc_06012026"
-DIFF_STAGING_DB = "mssql+pymssql://sa:ndADMIN2025@localhost:1435/mobiledoc_difftestkaran"
-DB_TYPE = "mssql"
-DIFFMERGED_CONN = "mssql+pymssql://sa:ndADMIN2025@localhost:1435/mobiledoc_diffmergeddifftest"
-
-HISTORICAL_DATA_DEFAULT_DATE = "2025-09-28 00:00:00"
- 
-'''
-
-STATE_DIRECTORY = "/Users/ndaicnsarizona/Desktop/production_state_incremental/state"
-TABLE_CSV = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/arizona_priority_tables.csv"
-PK_CSV = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/arizona_primary_keys.csv"
-
-BASE_DB = "mssql+pyodbc://sa:ndADMIN2025@127.0.0.1:1437/mobiledoc_base_2302?driver=ODBC+Driver+17+for+SQL+Server"
-PROD_DB = "mssql+pyodbc://sa:ndADMIN2025@127.0.0.1:1437/mobiledoc_latest?driver=ODBC+Driver+17+for+SQL+Server"
-DIFF_STAGING_DB = "mssql+pyodbc://sa:ndADMIN2025@127.0.0.1:1437/mobiledoc_diff_staging?driver=ODBC+Driver+17+for+SQL+Server"
-DB_TYPE = "mssql"
-DIFFMERGED_CONN = "mssql+pyodbc://sa:ndADMIN2025@127.0.0.1:1437/mobiledoc_diff_merged?driver=ODBC+Driver+17+for+SQL+Server"
-
-HISTORICAL_DATA_DEFAULT_DATE = "2026-02-23 00:00:00"
+STATE_DIRECTORY = STATE_DIR
 
 # ============================================================
 # ===================== LOGGING SETUP ========================

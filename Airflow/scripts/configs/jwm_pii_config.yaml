@@ -1,0 +1,253 @@
+combine:
+  patientfullname:
+    combine:
+    - Person_FirstName
+    - Person_MiddleName1
+    - Person_MiddleName2
+    - Person_LastName
+    - Person_NickName
+    - Person_MaidenName
+    masking_value: ((PATIENT_NAME))
+    processing_func: null
+    regex: null
+dob:
+  Person_DateOfBirth:
+    masking_value: ((PATIENT_DOB))
+mask:
+  BILLING_AddressLine1:
+    masking_value: ((BILLING_PATIENT_ADDRESS))
+    processing_func: null
+    regex: null
+  BILLING_AddressLine2:
+    masking_value: ((BILLING_PATIENT_ADDRESS))
+    processing_func: null
+    regex: null
+  BILLING_City:
+    masking_value: ((BILLING_PATIENT_CITY))
+    processing_func: null
+    regex: null
+  BILLING_County:
+    masking_value: ((BILLING_PATIENT_COUNTY))
+    processing_func: null
+    regex: null
+  BILLING_FaxNumber:
+    masking_value: ((BILLING_FAX))
+    processing_func: null
+    regex: null
+  BILLING_PostalCode:
+    masking_value: ((ZIP_CODE))
+    processing_func: null
+    regex: null
+  Employers_Address1:
+    masking_value: ((EMPLOYER_ADDRESS))
+    processing_func: null
+    regex: null
+  Employers_Address2:
+    masking_value: ((EMPLOYER_ADDRESS))
+    processing_func: null
+    regex: null
+  Employers_City:
+    masking_value: ((EMPLOYER_CITY))
+    processing_func: null
+    regex: null
+  Employers_ContactName:
+    masking_value: ((EMPLOYER_DETAILS))
+    processing_func: null
+    regex: null
+  Employers_County:
+    masking_value: ((EMPLOYER_COUNTY))
+    processing_func: null
+    regex: null
+  Employers_Fax:
+    masking_value: ((EMPLOYER_FAX))
+    processing_func: null
+    regex: null
+  Employers_Name:
+    masking_value: ((EMPLOYER_NAME))
+    processing_func: null
+    regex: null
+  Patient_AltPatientID:
+    masking_value: ((PATIENTID_IDENTIFIER))
+    processing_func: null
+    regex: null
+  Patient_OrgPatientID:
+    masking_value: ((PATIENTID_IDENTIFIER))
+    processing_func: null
+    regex: null
+  Person_CellPhone1:
+    masking_value: ((PHONE_NUMBER))
+    processing_func: null
+    regex: null
+  Person_CellPhone2:
+    masking_value: ((PHONE_NUMBER))
+    processing_func: null
+    regex: null
+  Person_DriverLicNum:
+    masking_value: ((DRIVERS_LICENSE))
+    processing_func: null
+    regex: null
+  Person_FirstName:
+    masking_value: ((PATIENT_NAME))
+    processing_func: null
+    regex: null
+  Person_LastName:
+    masking_value: ((PATIENT_NAME))
+    processing_func: null
+    regex: null
+  Person_MaidenName:
+    masking_value: ((PATIENT_NAME))
+    processing_func: null
+    regex: null
+  Person_MiddleName1:
+    masking_value: ((PATIENT_NAME))
+    processing_func: null
+    regex: null
+  Person_MiddleName2:
+    masking_value: ((PATIENT_NAME))
+    processing_func: null
+    regex: null
+  Person_NickName:
+    masking_value: ((PATIENT_NAME))
+    processing_func: null
+    regex: null
+  Person_Occupation:
+    masking_value: ((OCCUPATION))
+    processing_func: null
+    regex: null
+  Person_Pager:
+    masking_value: ((PAGER_NO))
+    processing_func: null
+    regex: null
+  Person_PrimaryPhone:
+    masking_value: ((PHONE_NUMBER))
+    processing_func: null
+    regex: null
+  Person_PrimaryWorkPhone:
+    masking_value: ((PHONE_NUMBER))
+    processing_func: null
+    regex: null
+  PersonEmployers_PersonalPhoneNumber:
+    masking_value: ((PHONE_NUMBER))
+    processing_func: null
+    regex: null
+  RESIDENTIAL_AddressLine1:
+    masking_value: ((RESIDENTIAL_PATIENT_ADDRESS))
+    processing_func: null
+    regex: null
+  RESIDENTIAL_AddressLine2:
+    masking_value: ((RESIDENTIAL_PATIENT_ADDRESS))
+    processing_func: null
+    regex: null
+  RESIDENTIAL_City:
+    masking_value: ((RESIDENTIAL_PATIENT_CITY))
+    processing_func: null
+    regex: null
+  RESIDENTIAL_County:
+    masking_value: ((RESIDENTIAL_PATIENT_COUNTY))
+    processing_func: null
+    regex: null
+  RESIDENTIAL_FaxNumber:
+    masking_value: ((RESIDENTIAL_FAX))
+    processing_func: null
+    regex: null
+  RESIDENTIAL_PostalCode:
+    masking_value: ((ZIP_CODE))
+    processing_func: null
+    regex: null
+regex:
+  BILLING_PhoneNum1:
+    masking_value: ((BILLING_PHONE_NUMBER))
+    processing_func: null
+    regex:
+    - \(\d{3}\)\s*\d{3}-\d{4}
+    - \b\d{3}-\d{3}-\d{4}\b
+    - \+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b
+    - \b\d{3} \d{3} \d{4}\b
+  BILLING_PhoneNum2:
+    masking_value: ((BILLING_PHONE_NUMBER))
+    processing_func: null
+    regex:
+    - \(\d{3}\)\s*\d{3}-\d{4}
+    - \b\d{3}-\d{3}-\d{4}\b
+    - \+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b
+    - \b\d{3} \d{3} \d{4}\b
+  Employers_Phone:
+    masking_value: ((EMPLOYER_PHONE))
+    processing_func: null
+    regex:
+    - \(\d{3}\)\s*\d{3}-\d{4}
+    - \b\d{3}-\d{3}-\d{4}\b
+    - \+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b
+    - \b\d{3} \d{3} \d{4}\b
+  Person_CellPhone1:
+    masking_value: ((PHONE_NUMBER))
+    processing_func: null
+    regex:
+    - \(\d{3}\)\s*\d{3}-\d{4}
+    - \b\d{3}-\d{3}-\d{4}\b
+    - \+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b
+    - \b\d{3} \d{3} \d{4}\b
+  Person_CellPhone2:
+    masking_value: ((PHONE_NUMBER))
+    processing_func: null
+    regex:
+    - \(\d{3}\)\s*\d{3}-\d{4}
+    - \b\d{3}-\d{3}-\d{4}\b
+    - \+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b
+    - \b\d{3} \d{3} \d{4}\b
+  Person_EMail1:
+    masking_value: ((EMAIL_ID))
+    processing_func: null
+    regex:
+    - \b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b
+  Person_EMail2:
+    masking_value: ((EMAIL_ID))
+    processing_func: null
+    regex:
+    - \b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b
+  Person_PrimaryPhone:
+    masking_value: ((PHONE_NUMBER))
+    processing_func: null
+    regex:
+    - \(\d{3}\)\s*\d{3}-\d{4}
+    - \b\d{3}-\d{3}-\d{4}\b
+    - \+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b
+    - \b\d{3} \d{3} \d{4}\b
+  Person_PrimaryWorkPhone:
+    masking_value: ((PHONE_NUMBER))
+    processing_func: null
+    regex:
+    - \(\d{3}\)\s*\d{3}-\d{4}
+    - \b\d{3}-\d{3}-\d{4}\b
+    - \+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b
+    - \b\d{3} \d{3} \d{4}\b
+  Person_SSN:
+    masking_value: ((SSN))
+    processing_func: null
+    regex:
+    - \b\d{3}[- ]\d{2}[- ]\d{4}\b
+  RESIDENTIAL_PhoneNum1:
+    masking_value: ((RESIDENTIAL_PHONE_NUMBER))
+    processing_func: null
+    regex:
+    - \(\d{3}\)\s*\d{3}-\d{4}
+    - \b\d{3}-\d{3}-\d{4}\b
+    - \+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b
+    - \b\d{3} \d{3} \d{4}\b
+  RESIDENTIAL_PhoneNum2:
+    masking_value: ((RESIDENTIAL_PHONE_NUMBER))
+    processing_func: null
+    regex:
+    - \(\d{3}\)\s*\d{3}-\d{4}
+    - \b\d{3}-\d{3}-\d{4}\b
+    - \+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b
+    - \b\d{3} \d{3} \d{4}\b
+replace_value:
+- new_value: ((FACILITYNAME))
+  old_value: Josephson-Wallack-Munshower
+- new_value: ((FACILITYNAME))
+  old_value: JWM Neurology
+- new_value: ((FACILITYNAME))
+  old_value: JWM
+- new_value: ((FACILITYNAME))
+  old_value: Josephson Wallack Munshower

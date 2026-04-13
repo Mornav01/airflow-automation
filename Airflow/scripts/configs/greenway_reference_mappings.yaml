@@ -1,0 +1,84 @@
+# Reference mapping join conditions per table.
+# Each table key maps to a JoinCondition that resolves an indirect patient/encounter ID
+# by walking a chain of reference tables in the source database.
+#
+# Structure:
+#   <table_name>:
+#     source_table: <table being deidentified>
+#     destination_column: <column name to resolve (e.g. PatientID)>
+#     destination_column_type: patient_id | encounter_id
+#     conditions:
+#       - source_column: <column in current table to join from>
+#         reference_table: <table to look up>
+#         column_name: <join key in the reference table>
+#
+# Multi-hop example: add more entries under conditions in order.
+
+ERXPatMedList:
+  source_table: ERXPatMedList
+  destination_column: PatientID
+  destination_column_type: patient_id
+  conditions:
+    - source_column: ClinicalPatMedID
+      reference_table: ClinicalPatMeds
+      column_name: ClinicalPatMedID
+
+ClinicalDocumentPatHist:
+  source_table: ClinicalDocumentPatHist
+  destination_column: PatientID
+  destination_column_type: patient_id
+  conditions:
+    - source_column: DocumentID
+      reference_table: ClinicalDocuments
+      column_name: DocumentID
+
+ClinicalBin_Suv_Bio_Epi_decrypt:
+  source_table: ClinicalBin_Suv_Bio_Epi_decrypt
+  destination_column: PatientID
+  destination_column_type: patient_id
+  conditions:
+    - source_column: DocumentID
+      reference_table: ClinicalDocuments
+      column_name: DocumentID
+
+OrdReqDiagnosis:
+  source_table: OrdReqDiagnosis
+  destination_column: PatientID
+  destination_column_type: patient_id
+  conditions:
+    - source_column: OrdReqID
+      reference_table: OrdReqClinicalDocuments
+      column_name: OrdReqID
+    - source_column: DocumentID
+      reference_table: ClinicalDocuments
+      column_name: DocumentID
+
+OrdReqNote:
+  source_table: OrdReqNote
+  destination_column: PatientID
+  destination_column_type: patient_id
+  conditions:
+    - source_column: OrdReqID
+      reference_table: OrdReqClinicalDocuments
+      column_name: OrdReqID
+    - source_column: DocumentID
+      reference_table: ClinicalDocuments
+      column_name: DocumentID
+
+OBXNote:
+  source_table: OBXNote
+  destination_column: PatientID
+  destination_column_type: patient_id
+  conditions:
+    - source_column: OBXId
+      reference_table: OBX
+      column_name: OBXId
+
+ClinicalPatMedsFillStatus:
+  source_table: ClinicalPatMedsFillStatus
+  destination_column: PatientID
+  destination_column_type: patient_id
+  conditions:
+    - source_column: ClinicalPatMedID
+      reference_table: ClinicalPatMeds
+      column_name: ClinicalPatMedID

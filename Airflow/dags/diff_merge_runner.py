@@ -14,9 +14,15 @@ from airflow.task.trigger_rule import TriggerRule
 # Config
 # ──────────────────────────────────────────────
 
+import sys
+
 local_tz = pendulum.timezone("Asia/Kolkata")
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.abspath(os.path.join(SCRIPT_DIR, "..", "scripts")))
+
+from db_config import STATE_DIR, PK_CSV, DIFF_MERGE_TABLES_CSV  # noqa: E402
+
 PYTHON_EXECUTABLE = os.environ.get("AIRFLOW_PYTHON", "python")
 
 default_args = {
@@ -38,9 +44,9 @@ with DAG(
     default_args=default_args,
     tags=["diff_merge"],
     params={
-        "tables_csv": "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/arizona_pt_for_diffmergedecrypt.csv",
-        "pk_csv": "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/arizona_primary_keys.csv",
-        "state_dir": "/Users/ndaicnsarizona/Desktop/production_state_incremental/state",
+        "tables_csv": DIFF_MERGE_TABLES_CSV,
+        "pk_csv":     PK_CSV,
+        "state_dir":  STATE_DIR,
     },
 ) as dag:
 

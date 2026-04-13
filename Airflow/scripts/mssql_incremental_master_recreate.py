@@ -9,10 +9,10 @@ from pathlib import Path
 import pandas as pd
 from sqlalchemy import create_engine, text
 
-from db_config import STATE_DIR
+from db_config import STATE_DIR, MASTER_MSSQL_CONN_STR, MASTER_MYSQL_CONN_STR
 
-MSSQL_CONN_STR = "mssql+pymssql://sa:ndADMIN2025@localhost:1437/mobiledoc_latest"
-MYSQL_CONN_STR = "mysql+pymysql://root:ndADMIN%402025@localhost:3306/master_sep"
+MSSQL_CONN_STR = MASTER_MSSQL_CONN_STR
+MYSQL_CONN_STR = MASTER_MYSQL_CONN_STR
 
 STATE_DIRECTORY = os.path.join(STATE_DIR, "mapping_master")
 

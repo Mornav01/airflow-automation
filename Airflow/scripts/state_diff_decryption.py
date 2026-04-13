@@ -61,21 +61,22 @@ from tqdm import tqdm
 # ===================== CONFIG ===============================
 # ============================================================
 
-STATE_DIRECTORY = "/Users/ndaicnsarizona/Desktop/production_state_incremental/state"
+from db_config import (
+    BASE_DB, DIFF_STAGING_DB, DIFFMERGED_CONN,
+    STATE_DIR, PK_CSV, HISTORICAL_DATA_DEFAULT_DATE,
+)
+
+STATE_DIRECTORY = STATE_DIR
 
 # Source: read encrypted rows from diff_merged
 # Destination: write decrypted table back into the same diff_staging DB (new table name)
-DIFF_STAGING_CONN = "mssql+pyodbc://sa:ndADMIN2025@127.0.0.1:1437/mobiledoc_diff_staging?driver=ODBC+Driver+17+for+SQL+Server"
+DIFF_STAGING_CONN = DIFF_STAGING_DB
 
 # Merge step 1: merge decrypted table into base
-BASE_CONN = "mssql+pyodbc://sa:ndADMIN2025@127.0.0.1:1437/mobiledoc_base_2302?driver=ODBC+Driver+17+for+SQL+Server"
+BASE_CONN = BASE_DB
 
 # Merge step 2: accumulate merged snapshot into diff_merged
-DIFF_MERGED_CONN = "mssql+pyodbc://sa:ndADMIN2025@127.0.0.1:1437/mobiledoc_diff_merged?driver=ODBC+Driver+17+for+SQL+Server"
-
-PK_CSV = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/arizona_primary_keys.csv"
-
-HISTORICAL_DATA_DEFAULT_DATE = "2026-02-23 00:00:00"
+DIFF_MERGED_CONN = DIFFMERGED_CONN
 
 DECRYPT_BATCH_SIZE = 1000
 DECRYPT_MAX_WORKERS = 10

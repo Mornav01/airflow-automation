@@ -26,12 +26,12 @@ from datetime import datetime
 # ===================== CONFIG ===============================
 # ============================================================
 from db_config import DEID_REPO_DIR
-from db_config import MSSQL_DIFFMERGED_CONN, MYSQL_DEID_STAGING_CONN, STATE_DIR
+from db_config import DIFFMERGED_CONN, MYSQL_DEID_STAGING_CONN, STATE_DIR
 
 DJANGO_PROJECT_DIR = os.path.join(DEID_REPO_DIR, "deIdentification")
 
 # Connection to the SOURCE table (diff-merged DB — input to deidentification)
-DEID_SOURCE_CONN = MSSQL_DIFFMERGED_CONN
+DEID_SOURCE_CONN = DIFFMERGED_CONN
 
 # Connection to the DEIDENTIFIED output table (diff staging — output of deidentification workers)
 DEID_OUTPUT_CONN = MYSQL_DEID_STAGING_CONN

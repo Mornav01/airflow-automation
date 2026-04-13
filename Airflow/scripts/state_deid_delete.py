@@ -33,10 +33,10 @@ from datetime import datetime
 # ===================== CONFIG ===============================
 # ============================================================
 
-from db_config import MSSQL_DIFFMERGED_CONN, STATE_DIR
+from db_config import DIFFMERGED_CONN, STATE_DIR
 
 # Original accumulated data DB — rows are deleted here after deidentification + merge
-DEID_DIFF_CONN = MSSQL_DIFFMERGED_CONN
+DEID_DIFF_CONN = DIFFMERGED_CONN
 
 # Column that records when each row was extracted into the diff pipeline
 EXTRACTED_DATE_COLUMN = "nd_extracted_date"

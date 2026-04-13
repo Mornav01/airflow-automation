@@ -29,7 +29,7 @@ load_dotenv(dotenv_path=os.path.abspath(_ENV_FILE), override=False)
 _CONFIGS_DIR  = os.path.join(_SCRIPT_DIR, "configs")
 
 DEFAULT_CONFIG = os.path.join(_CONFIGS_DIR, "config_historical.yaml")
-DEFAULT_TABLES = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/test.csv"
+DEFAULT_TABLES = "/Users/ndaijwm/Desktop/airflow_incremental/airflow-automation/input/test1.csv"
 
 # Uses new_deid conda env if set, falls back to current Python
 DEID_PYTHON = os.environ.get("DEID_PYTHON", sys.executable)

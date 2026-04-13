@@ -13,9 +13,15 @@ from airflow.task.trigger_rule import TriggerRule
 # Config
 # ──────────────────────────────────────────────
 
+import sys
+
 local_tz = pendulum.timezone("Asia/Kolkata")
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.abspath(os.path.join(SCRIPT_DIR, "..", "scripts")))
+
+from db_config import DBDETAILSMODEL_NAME, DEID_POST_PROCESS_TABLES_CSV  # noqa: E402
+
 PYTHON_EXECUTABLE = os.environ.get("AIRFLOW_PYTHON", "python")
 
 default_args = {
@@ -37,8 +43,8 @@ with DAG(
     default_args=default_args,
     tags=["deid"],
     params={
-        "dbdetailsmodel_name": "arizona_mobiledoc_incremental",
-        "tables_filepath": "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/test.csv"
+        "dbdetailsmodel_name": DBDETAILSMODEL_NAME,
+        "tables_filepath":     DEID_POST_PROCESS_TABLES_CSV,
     },
 ) as dag:
 

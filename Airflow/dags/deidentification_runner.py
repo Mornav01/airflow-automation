@@ -21,7 +21,11 @@ local_tz = pendulum.timezone("Asia/Kolkata")
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.abspath(os.path.join(SCRIPT_DIR, "..", "scripts")))
 
-from db_config import STATE_DIR  # noqa: E402  # type: ignore[import-untyped]
+from db_config import (  # noqa: E402  # type: ignore[import-untyped]
+    STATE_DIR,
+    MAPPING_SQL_FILE, MASTER_PII_SQL_FILE, MASTER_INSURANCE_SQL_FILE,
+    DBDETAILSMODEL_NAME, DEID_TABLES_CSV,
+)
 
 PYTHON_EXECUTABLE = os.environ.get("AIRFLOW_PYTHON", "python")
 
@@ -51,13 +55,13 @@ with DAG(
     tags=["deid", "mapping"],
     params={
         # Mapping Master params
-        "mapping_sql_file":          "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/Airflow/scripts/sql/mapping_ecw.sql",
-        "master_pii_sql_file":       "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/Airflow/scripts/sql/master_pii_data_table_ecw.sql",
-        "master_insurance_sql_file": "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/Airflow/scripts/sql/master_insurance_query_ecw.sql",
+        "mapping_sql_file":          MAPPING_SQL_FILE,
+        "master_pii_sql_file":       MASTER_PII_SQL_FILE,
+        "master_insurance_sql_file": MASTER_INSURANCE_SQL_FILE,
         # Deidentification params
-        "num_workers":          5,
-        "dbdetailsmodel_name":  "arizona_mobiledoc_incremental",
-        "tables_filepath":      "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/test.csv",
+        "num_workers":         5,
+        "dbdetailsmodel_name": DBDETAILSMODEL_NAME,
+        "tables_filepath":     DEID_TABLES_CSV,
     },
 ) as dag:
 
