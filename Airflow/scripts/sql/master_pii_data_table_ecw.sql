@@ -18,6 +18,7 @@ SELECT
     u.initials                  AS users_initials,
     u.ptDob                     AS users_ptDob,
     u.upreviousname             AS users_upreviousname,
+    p.ControlNo                 AS patients_controlno,
     p.employername              AS patients_employername,
     p.employeraddress           AS patients_employeraddress,
     p.employeraddress2          AS patients_employeraddress2,

@@ -6,14 +6,19 @@ import logging
 import os
 import sys
 from datetime import datetime
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).parent.parent / "manual.env")
 
 # ============================================================
 # ===================== DJANGO SETUP =========================
 # ============================================================
 
-STATE_DIRECTORY = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/state/manual_deid_runner/"
+STATE_DIRECTORY = os.environ["DEID_POLAR_STATE_DIR"]
 
-BASE_REPO_DIR = "/Users/ndaicnsarizona/Desktop/deidentification_polars_2/deidentification_v2/"
+BASE_REPO_DIR = os.environ["DEID_POLAR_REPO_DIR"]
 
 DJANGO_PROJECT_DIR = os.path.join(BASE_REPO_DIR, "deIdentification")
 sys.path.insert(0, DJANGO_PROJECT_DIR)
@@ -237,11 +242,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--dbdetailsmodel_name",
-        default="arizona_mobiledoc_base",
+        default=os.environ["DEID_POLAR_DBMODEL"],
     )
     parser.add_argument(
         "--tables_filepath",
-        default="/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/test.csv",
+        default=os.environ["DEID_POLAR_TABLES_FILE"],
     )
 
     args = parser.parse_args()

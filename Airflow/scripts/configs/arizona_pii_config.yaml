@@ -1,9 +1,9 @@
 combine:
   patientfullname:
     combine:
-    - ufname
-    - uminitial
-    - ulname
+    - users_ufname
+    - users_uminitial
+    - users_ulname
     masking_value: ((PATIENTNAME))
     processing_func: null
     regex: null
@@ -33,6 +33,9 @@ mask:
     min_length: 2
   users_upcity:
     masking_value: ((PatientCity))
+    min_length: 2
+  patients_controlno:
+    masking_value: ((ControlNo))
     min_length: 2
   patients_GrId:
     masking_value: ((PatientDetail))

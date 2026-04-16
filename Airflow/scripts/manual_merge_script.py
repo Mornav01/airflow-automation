@@ -25,21 +25,27 @@ import os
 import sys
 import traceback
 from datetime import datetime
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# ── Load manual.env (shared config for all manual scripts) ────────────────────
+load_dotenv(Path(__file__).parent.parent / "manual.env")
 
 # ============================================================
 # ===================== CONFIG ===============================
 # ============================================================
 
-DB_TYPE = "mysql"
+DB_TYPE = os.environ["MERGE_DB_TYPE"]
 
-DEID_MAIN_CONN         = "mysql+pymysql://ndadmin:ndADMIN%402025@localhost:3306/deidentified_mobiledoc_base"
-DEID_DIFF_STAGING_CONN = "mysql+pymysql://ndadmin:ndADMIN%402025@localhost:3306/deidentified_mobiledoc_diff_staging"
-DEID_DIFF_MERGED_CONN  = "mysql+pymysql://ndadmin:ndADMIN%402025@localhost:3306/deidentified_mobiledoc_diff_merged"
+DEID_MAIN_CONN         = os.environ["MERGE_MAIN_CONN"]
+DEID_DIFF_STAGING_CONN = os.environ["MERGE_DIFF_STAGING_CONN"]
+DEID_DIFF_MERGED_CONN  = os.environ["MERGE_DIFF_MERGED_CONN"]
 
-HISTORICAL_DATA_DEFAULT_DATE = "2026-02-23 00:00:00"
+HISTORICAL_DATA_DEFAULT_DATE = os.environ["MERGE_DEFAULT_DATE"]
 
-DEFAULT_PK_CSV     = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/arizona_primary_keys.csv"
-DEFAULT_STATUS_CSV = "/Users/ndaicnsarizona/Desktop/production_state_incremental/manual_merge_status.csv"
+DEFAULT_PK_CSV     = os.environ["MERGE_PK_CSV"]
+DEFAULT_STATUS_CSV = os.environ["MERGE_STATUS_CSV"]
 
 STATUS_CSV_FIELDS = ["table_name", "status", "updated_rows", "new_rows", "diffmerged_rows", "message", "timestamp"]
 

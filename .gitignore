@@ -30,6 +30,7 @@ Airflow/airflow-webserver.pid
 state/*
 input/*
 .env
+Airflow/manual.env
 
 deid_runtime/
 

@@ -1,15 +1,18 @@
 import csv
 import os
 import sqlalchemy
+from pathlib import Path
 from sqlalchemy import text
 from datetime import datetime, timezone
+from dotenv import load_dotenv
 
+load_dotenv(Path(__file__).parent.parent / "manual.env")
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-CONNECTION_STRING = "mssql+pymssql://sa:ndADMIN2025@localhost:1437/mobiledoc_base_2302"
-TABLES_INPUT_FILE = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/phase12_tables.csv"   # one table name per line, no header
-LOG_FILE          = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/state/adhoc/add_nd_columns_log.csv"
-DEFAULT_DATE      = "2026-03-11 00:00:00"   # used when populating nd_extracted_date
+CONNECTION_STRING = os.environ["ADD_ND_CONN"]
+TABLES_INPUT_FILE = os.environ["ADD_ND_TABLES_FILE"]
+LOG_FILE          = os.environ["ADD_ND_LOG_FILE"]
+DEFAULT_DATE      = os.environ["ADD_ND_DEFAULT_DATE"]
 # ──────────────────────────────────────────────────────────────────────────────
 
 LOG_FIELDNAMES = ["table_name", "status", "timestamp", "error"]

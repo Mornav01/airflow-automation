@@ -19,20 +19,17 @@ from datetime import datetime
 
 from dotenv import load_dotenv
 
-# ── Load .env (always from Airflow/.env regardless of CWD) ───────────────────
+# ── Load manual.env ───────────────────────────────────────────────────────────
 
-_SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
-_ENV_FILE     = os.path.join(_SCRIPT_DIR, "..", ".env")
-load_dotenv(dotenv_path=os.path.abspath(_ENV_FILE), override=False)
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(dotenv_path=os.path.join(_SCRIPT_DIR, "..", "manual.env"))
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
-_CONFIGS_DIR  = os.path.join(_SCRIPT_DIR, "configs")
-
-DEFAULT_CONFIG = os.path.join(_CONFIGS_DIR, "config_historical.yaml")
-DEFAULT_TABLES = "/Users/ndaijwm/Desktop/airflow_incremental/airflow-automation/input/test1.csv"
+DEFAULT_CONFIG = os.environ["DEID_V2_CONFIG"]
+DEFAULT_TABLES = os.environ["DEID_V2_TABLES"]
 
 # Uses new_deid conda env if set, falls back to current Python
-DEID_PYTHON = os.environ.get("DEID_PYTHON", sys.executable)
+DEID_PYTHON = os.environ["DEID_PYTHON"]
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 

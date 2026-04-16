@@ -51,7 +51,7 @@ from datetime import date
 from datetime import datetime
 
 from sqlalchemy import (
-    Column, MetaData, Table, Text, create_engine, insert, select, text
+    Column, MetaData, Table, Text, create_engine, func, insert, select
 )
 from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.dialects.mssql import NVARCHAR
@@ -264,14 +264,14 @@ def decrypt_progressnotes(source_engine, dest_engine, source_table_name, dest_ta
     Reads from source_engine, writes decrypted rows to dest_engine.
     Returns the number of rows written.
     """
-    # ── Read source ──────────────────────────────────────────
+    # ── Reflect source schema + row count ────────────────────
     logging.info("[progressnotes] reading source table")
     metadata = MetaData()
     with source_engine.connect() as src_conn:
         src_table = Table(source_table_name, metadata, autoload_with=src_conn)
-        rows = src_conn.execute(select(src_table)).fetchall()
+        total_rows = src_conn.execute(select(func.count()).select_from(src_table)).scalar()
 
-    logging.info("[progressnotes] read %d rows from source", len(rows))
+    logging.info("[progressnotes] read %d rows from source", total_rows)
 
     # ── Create dest table mirroring source schema ─────────────
     dest_metadata = MetaData()
@@ -300,7 +300,7 @@ def decrypt_progressnotes(source_engine, dest_engine, source_table_name, dest_ta
         dest_metadata.create_all(dest_conn, tables=[dest_table])
     logging.info("[progressnotes] dest table '%s' created", dest_table_name)
 
-    # ── Decrypt rows in parallel batches ─────────────────────
+    # ── Stream source → decrypt in parallel → write per batch ─
     decryptor = ProgressNoteDecryptor()
 
     insert_stmt = insert(dest_table)
@@ -328,17 +328,27 @@ def decrypt_progressnotes(source_engine, dest_engine, source_table_name, dest_ta
         return processed
 
     total_inserted = 0
-    with dest_engine.begin() as dest_conn:
-        with ThreadPoolExecutor(max_workers=DECRYPT_MAX_WORKERS) as executor:
-            futures = [
-                executor.submit(process_batch, chunk)
-                for chunk in _batch(rows, DECRYPT_BATCH_SIZE)
-            ]
-            for future in tqdm(futures, desc="[progressnotes] inserting", unit="batch"):
-                processed_rows = future.result()
-                if processed_rows:
+    with source_engine.connect().execution_options(
+        stream_results=True,
+        max_row_buffer=DECRYPT_BATCH_SIZE,
+    ) as src_conn, \
+    ThreadPoolExecutor(max_workers=DECRYPT_MAX_WORKERS) as executor, \
+    tqdm(total=total_rows, desc="[progressnotes] inserting", unit="row") as pbar:
+
+        result = src_conn.execute(select(src_table))
+
+        while True:
+            chunk = result.fetchmany(DECRYPT_BATCH_SIZE)
+            if not chunk:
+                break
+
+            processed_rows = executor.submit(process_batch, chunk).result()
+            if processed_rows:
+                with dest_engine.begin() as dest_conn:
                     dest_conn.execute(insert_stmt, processed_rows)
-                    total_inserted += len(processed_rows)
+                total_inserted += len(processed_rows)
+
+            pbar.update(len(chunk))
 
     logging.info("[progressnotes] inserted %d decrypted rows into '%s'",
                  total_inserted, dest_table_name)
