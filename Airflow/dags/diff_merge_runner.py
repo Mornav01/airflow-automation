@@ -74,7 +74,7 @@ with DAG(
             params["state_dir"],
         ]
 
-        result = subprocess.run(cmd)
+        result = subprocess.run(cmd, env={**os.environ, "PYTHONUNBUFFERED": "1"})
 
         if result.returncode != 0:
             raise RuntimeError("Diff + Merge execution failed")
@@ -103,7 +103,7 @@ with DAG(
             "--state_dir",       params["state_dir"],
         ]
 
-        result = subprocess.run(cmd)
+        result = subprocess.run(cmd, env={**os.environ, "PYTHONUNBUFFERED": "1"})
 
         if result.returncode != 0:
             raise RuntimeError("Decryption step failed")

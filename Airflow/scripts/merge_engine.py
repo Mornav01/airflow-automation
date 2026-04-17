@@ -69,10 +69,6 @@ def _raw_bulk_insert(engine: Engine, table: str, df: pd.DataFrame,
             batch_rows = rows[i:i + chunk]
             cur.executemany(sql, batch_rows)
             raw.commit()
-            if batch_num % 25 == 0 or batch_num == n_batches:
-                logging.info("[_raw_bulk_insert] [%s] Batch %d/%d — %d/%d rows inserted so far",
-                             table, batch_num, n_batches, min(i + chunk, total), total)
-
         cur.close()
     except Exception as e:
         logging.error("[_raw_bulk_insert] [%s] ERROR: %s — rolling back", table, e)
@@ -80,8 +76,6 @@ def _raw_bulk_insert(engine: Engine, table: str, df: pd.DataFrame,
         raise
     finally:
         raw.close()
-
-    logging.info("[_raw_bulk_insert] [%s] DONE — inserted %d rows", table, total)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -108,7 +102,6 @@ def _raw_deactivate(engine: Engine, table: str, pk_df: pd.DataFrame,
     else:
         _deactivate_mysql(engine, db, table, pk_only, pk_cols, chunk)
 
-    logging.info("[_raw_deactivate] [%s] DONE — deactivated %d rows", table, total)
 
 
 def _deactivate_mssql(engine: Engine, table: str, pk_df: pd.DataFrame,
@@ -119,16 +112,14 @@ def _deactivate_mssql(engine: Engine, table: str, pk_df: pd.DataFrame,
     ins_sql       = f"INSERT INTO #tmp_deact ({pk_constraint}) VALUES ({ins_ph})"
     join_cond     = " AND ".join([f"m.{c} = t.{c}" for c in pk_cols])
 
-    rows      = [tuple(r) for r in pk_df.itertuples(index=False, name=None)]
-    total     = len(rows)
-    n_batches = (total + chunk - 1) // chunk
+    rows  = [tuple(r) for r in pk_df.itertuples(index=False, name=None)]
+    total = len(rows)
 
     raw = engine.raw_connection()
     try:
         cur = raw.cursor()
         cur.fast_executemany = True     # pyodbc only
 
-        logging.info("[_deactivate_mssql] [%s] Creating #tmp_deact (pk_cols=%s)", table, pk_cols)
         cur.execute(f"""
             CREATE TABLE #tmp_deact (
                 {col_defs},
@@ -136,17 +127,10 @@ def _deactivate_mssql(engine: Engine, table: str, pk_df: pd.DataFrame,
             )
         """)
 
-        logging.info("[_deactivate_mssql] [%s] Loading %d PK rows into #tmp_deact — %d batch(es) of %d",
-                     table, total, n_batches, chunk)
         for i in range(0, total, chunk):
-            batch_num  = i // chunk + 1
             batch_rows = rows[i:i + chunk]
             cur.executemany(ins_sql, batch_rows)
-            if batch_num % 25 == 0 or batch_num == n_batches:
-                logging.info("[_deactivate_mssql] [%s] Batch %d/%d — %d/%d PK rows loaded into #tmp_deact",
-                             table, batch_num, n_batches, min(i + chunk, total), total)
 
-        logging.info("[_deactivate_mssql] [%s] Running set-based UPDATE JOIN → nd_ActiveFlag='N'", table)
         cur.execute(f"""
             UPDATE m
             SET m.nd_ActiveFlag = 'N'
@@ -154,11 +138,10 @@ def _deactivate_mssql(engine: Engine, table: str, pk_df: pd.DataFrame,
             JOIN #tmp_deact t ON {join_cond}
             WHERE m.nd_ActiveFlag = 'Y'
         """)
-        logging.info("[_deactivate_mssql] [%s] UPDATE complete — %d rows flipped to N", table, cur.rowcount)
+        logging.info("[_deactivate_mssql] [%s] deactivated %d rows", table, cur.rowcount)
 
         cur.execute("DROP TABLE #tmp_deact")
         raw.commit()
-        logging.info("[_deactivate_mssql] [%s] Committed — #tmp_deact dropped", table)
         cur.close()
     except Exception as e:
         logging.error("[_deactivate_mssql] [%s] ERROR: %s — rolling back", table, e)
@@ -177,16 +160,13 @@ def _deactivate_mysql(engine: Engine, db: str, table: str,
     ins_sql       = f"INSERT INTO `{tmp}` ({pk_constraint}) VALUES ({ins_ph})"
     join_cond     = " AND ".join([f"m.`{c}` = t.`{c}`" for c in pk_cols])
 
-    rows      = [tuple(r) for r in pk_df.itertuples(index=False, name=None)]
-    total     = len(rows)
-    n_batches = (total + chunk - 1) // chunk
+    rows  = [tuple(r) for r in pk_df.itertuples(index=False, name=None)]
+    total = len(rows)
 
     raw = engine.raw_connection()
     try:
         cur = raw.cursor()
 
-        logging.info("[_deactivate_mysql] [%s] Creating TEMPORARY TABLE `%s` ENGINE=MEMORY (pk_cols=%s)",
-                     table, tmp, pk_cols)
         cur.execute(f"""
             CREATE TEMPORARY TABLE `{tmp}` (
                 {col_defs},
@@ -194,28 +174,20 @@ def _deactivate_mysql(engine: Engine, db: str, table: str,
             ) ENGINE=MEMORY
         """)
 
-        logging.info("[_deactivate_mysql] [%s] Loading %d PK rows into `%s` — %d batch(es) of %d",
-                     table, total, tmp, n_batches, chunk)
         for i in range(0, total, chunk):
-            batch_num  = i // chunk + 1
             batch_rows = rows[i:i + chunk]
             cur.executemany(ins_sql, batch_rows)
-            if batch_num % 25 == 0 or batch_num == n_batches:
-                logging.info("[_deactivate_mysql] [%s] Batch %d/%d — %d/%d PK rows loaded into `%s`",
-                             table, batch_num, n_batches, min(i + chunk, total), total, tmp)
 
-        logging.info("[_deactivate_mysql] [%s] Running set-based UPDATE JOIN → nd_ActiveFlag='N'", table)
         cur.execute(f"""
             UPDATE `{db}`.`{table}` m
             JOIN `{tmp}` t ON {join_cond}
             SET m.nd_ActiveFlag = 'N'
             WHERE m.nd_ActiveFlag = 'Y'
         """)
-        logging.info("[_deactivate_mysql] [%s] UPDATE complete — %d rows flipped to N", table, cur.rowcount)
+        logging.info("[_deactivate_mysql] [%s] deactivated %d rows", table, cur.rowcount)
 
         cur.execute(f"DROP TEMPORARY TABLE `{tmp}`")
         raw.commit()
-        logging.info("[_deactivate_mysql] [%s] Committed — `%s` dropped", table, tmp)
         cur.close()
     except Exception as e:
         logging.error("[_deactivate_mysql] [%s] ERROR: %s — rolling back", table, e)

@@ -71,7 +71,7 @@ with DAG(
             "--state_dir", params["state_dir"],
         ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, env={**os.environ, "PYTHONUNBUFFERED": "1"})
 
         if result.stdout:
             logging.info(result.stdout)
@@ -107,7 +107,7 @@ with DAG(
             "--state_dir",       params["state_dir"],
         ]
 
-        result = subprocess.run(cmd)
+        result = subprocess.run(cmd, env={**os.environ, "PYTHONUNBUFFERED": "1"})
 
         if result.returncode != 0:
             raise RuntimeError("Decryption step failed")
