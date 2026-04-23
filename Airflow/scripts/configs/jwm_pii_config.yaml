@@ -251,3 +251,13 @@ replace_value:
   old_value: JWM
 - new_value: ((FACILITYNAME))
   old_value: Josephson Wallack Munshower
+- new_value: ((FACILITYNAME))
+  old_value: Josephson Wallack Munschower
+- new_value: ((FACILITYNAME))
+  old_value: Josephson
+- new_value: ((FACILITYNAME))
+  old_value: Wallack
+- new_value: ((FACILITYNAME))
+  old_value: Munschower
+- new_value: ((FACILITYNAME))
+  old_value: J.W.M

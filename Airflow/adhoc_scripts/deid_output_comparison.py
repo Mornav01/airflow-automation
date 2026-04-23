@@ -31,8 +31,8 @@ from sqlalchemy import text
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-DEFAULT_TABLES = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/test.csv"
-DEFAULT_RULES_CSV = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/Airflow/scripts/configs/arizona_config_rules.csv"
+DEFAULT_TABLES = "/Users/ndaijwm/Desktop/airflow_incremental/airflow-automation/input/test2.csv"
+DEFAULT_RULES_CSV = "/Users/ndaijwm/Desktop/airflow_incremental/airflow-automation/Airflow/scripts/configs/adhoc_config_rules.csv"
 LOG_DIR = os.path.join(_SCRIPT_DIR, "..", "..", "deid_runtime", "logs")
 
 # Warn if a table has more than this many rows (memory caution)

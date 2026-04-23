@@ -1,9 +1,9 @@
 # ── Source & Destination Databases ──────────────────────────────────
 source_db:
   type: mssql
-  host: 127.0.0.1
-  port: 1437
-  database: mobiledoc_base_0601
+  host: localhost
+  port: 1433
+  database: Primerecord_latest
   username: ${SOURCE_USER}
   password: ${SOURCE_PW}
 
@@ -11,7 +11,7 @@ destination_db:
   type: mysql
   host: localhost
   port: 3306
-  database: deidentified_mobiledoc_base
+  database: deidentified_base
   username: ${DEST_USER}
   password: ${DEST_PW}
 
@@ -19,7 +19,7 @@ mappings_db:
   type: mysql
   host: localhost
   port: 3306
-  database: mapping_latest
+  database: mapping
   username: ${DEST_USER}
   password: ${DEST_PW}
 
@@ -27,8 +27,8 @@ mappings_db:
 config_key: historical
 
 # ── State Storage ────────────────────────────────────────────────────
-state_db_path: /Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/deid_runtime/state.db
-failed_rows_db_path: /Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/deid_runtime/failed_rows.db
+state_db_path: /Users/ndaijwm/Desktop/airflow_incremental/airflow-automation/deid_runtime/state.db
+failed_rows_db_path: /Users/ndaijwm/Desktop/airflow_incremental/airflow-automation/deid_runtime/failed_rows.db
 # .deid_staging/ is auto-placed next to state.db (same folder)
 
 # ── Redis ────────────────────────────────────────────────────────────
@@ -42,7 +42,7 @@ deidentification:
   random_seed: 42
 
 # ── Tables & Rules ───────────────────────────────────────────────────
-rules_csv: /Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/Airflow/scripts/configs/arizona_config_rules.csv
+rules_csv: /Users/ndaijwm/Desktop/airflow_incremental/airflow-automation/Airflow/scripts/configs/jwm_config_rules.csv
 
 # ── Mapping Tables ───────────────────────────────────────────────────
 mapping_tables:
@@ -68,7 +68,7 @@ workers:
 
 # ── Logging ──────────────────────────────────────────────────────────
 logging:
-  log_dir: /Users/ndaicnsarizona/Desktop/production_state_incremental/state/deidentification/logs/historical
+  log_dir: /Users/ndaijwm/Desktop/airflow_incremental/airflow-automation/deid_runtime/logs/historical
 
 # ── Quality Control ──────────────────────────────────────────────────
 qc:
@@ -77,12 +77,12 @@ qc:
 
 # ── PII / Notes Config ───────────────────────────────────────────────
 pii_db:
-  master_connection_str: "mysql+pymysql://${DEST_USER}:${DEST_PW}@localhost:3306/master_sep"
-  secondary_pii_connection_str: "mysql+pymysql://${DEST_USER}:${DEST_PW}@localhost:3306/master_sep"
+  master_connection_str: "mysql+pymysql://${DEST_USER}:${DEST_PW}@localhost:3306/master"
+  secondary_pii_connection_str: "mysql+pymysql://${DEST_USER}:${DEST_PW}@localhost:3306/master"
 
-secondary_pii_config_path: /Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/Airflow/scripts/configs/arizona_secondary_pii_config.yaml
+secondary_pii_config_path: /Users/ndaijwm/Desktop/airflow_incremental/airflow-automation/Airflow/scripts/configs/jwm_secondary_pii_config.yaml
 
-pii_config_path: /Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/Airflow/scripts/configs/arizona_pii_config.yaml
+pii_config_path: /Users/ndaijwm/Desktop/airflow_incremental/airflow-automation/Airflow/scripts/configs/jwm_pii_config.yaml
 
 # ── Reference Mapping Joins ───────────────────────────────────────────
-reference_mappings_path: /Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/Airflow/scripts/configs/ecw_reference_mappings.yaml
+reference_mappings_path: /Users/ndaijwm/Desktop/airflow_incremental/airflow-automation/Airflow/scripts/configs/greenway_reference_mappings.yaml

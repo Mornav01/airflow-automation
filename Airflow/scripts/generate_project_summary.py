@@ -8,6 +8,8 @@ Usage:
     python generate_project_summary.py --state_dir /path/to/state
     python generate_project_summary.py --state_dir /path/to/state --json
     python generate_project_summary.py --state_dir /path/to/state --failed_only
+    python generate_project_summary.py --state_dir /path/to/state --tables tableA tableB tableC
+    python generate_project_summary.py --state_dir /path/to/state --tables-csv /path/to/tables.csv
 """
 
 import csv
@@ -21,12 +23,15 @@ from db_config import STATE_DIR
 STATE_DIRECTORY = STATE_DIR
 
 
-def load_all_states(state_dir):
+def load_all_states(state_dir, filter_tables=None):
+    """Load state JSON files. If filter_tables is a set, only load those tables."""
     states = {}
     for fname in sorted(os.listdir(state_dir)):
         if not fname.endswith(".json"):
             continue
         table = fname[:-5]
+        if filter_tables is not None and table not in filter_tables:
+            continue
         path = os.path.join(state_dir, fname)
         try:
             with open(path) as f:
@@ -34,6 +39,20 @@ def load_all_states(state_dir):
         except Exception as e:
             states[table] = {"_load_error": str(e)}
     return states
+
+
+def resolve_filter_tables(tables_arg, tables_csv_arg):
+    """Return a set of table names to filter on, or None if no filter."""
+    names = set()
+    if tables_arg:
+        names.update(tables_arg)
+    if tables_csv_arg:
+        with open(tables_csv_arg, newline="") as f:
+            reader = csv.reader(f)
+            for row in reader:
+                if row:
+                    names.add(row[0].strip())
+    return names if names else None
 
 
 def build_summary(states, today):
@@ -164,6 +183,7 @@ def print_summary(summary, failed_only=False):
         for f in summary["diff_failures"]:
             print(f"  [{f['date']}]  {f['table']}")
             print(f"    {f['error'][:120]}")
+            pass
         print()
 
     if summary["merge_failures"]:
@@ -173,6 +193,7 @@ def print_summary(summary, failed_only=False):
         for f in summary["merge_failures"]:
             print(f"  [{f['date']}]  {f['table']}")
             print(f"    {f['error'][:120]}")
+            pass
         print()
 
     if summary["decryption_failures"]:
@@ -225,14 +246,19 @@ def export_csv(states, csv_path):
 
 def main():
     parser = argparse.ArgumentParser(description="Generate consolidated project summary from state files")
-    parser.add_argument("--state_dir",  default=STATE_DIRECTORY, help="Path to state directory")
-    parser.add_argument("--json",        action="store_true",     help="Output raw JSON instead of formatted text")
-    parser.add_argument("--failed_only", action="store_true",     help="Only print failure sections")
-    parser.add_argument("--csv", default="/Users/ndaicnsarizona/Desktop/production_state_incremental/state/summary/summary.csv", help="Export per-table CSV to this path")
+    parser.add_argument("--state_dir",   default=STATE_DIRECTORY, help="Path to state directory")
+    parser.add_argument("--json",        action="store_true",      help="Output raw JSON instead of formatted text")
+    parser.add_argument("--failed_only", action="store_true",      help="Only print failure sections")
+    parser.add_argument("--csv", default="/Users/ndaijwm/Desktop/airflow_incremental/airflow-automation/state/summary/summary.csv", help="Export per-table CSV to this path")
+    parser.add_argument("--tables",      nargs="+", metavar="TABLE", help="Only summarise these specific tables")
+    parser.add_argument("--tables-csv",  metavar="FILE",           help="CSV file whose first column lists tables to include")
     args = parser.parse_args()
 
     today = date.today().isoformat()
-    states = load_all_states(args.state_dir)
+    filter_tables = resolve_filter_tables(args.tables, args.tables_csv)
+    if filter_tables:
+        print(f"  Filtering to {len(filter_tables)} table(s): {', '.join(sorted(filter_tables))}\n")
+    states = load_all_states(args.state_dir, filter_tables)
     summary = build_summary(states, today)
 
     if args.json:
