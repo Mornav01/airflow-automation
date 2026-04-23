@@ -366,7 +366,7 @@ def insert_to_diff(
         schema=schema,
         if_exists="append",
         index=False,
-        chunksize=10_000,  # memory chunking; fast_executemany on engine handles perf
+        chunksize=500,  # small batches — pyodbc fast_executemany preallocates max-width buffers
     )
     log.info("  Done inserting %d rows  diff_type='%s'.", len(df), diff_type)
 
@@ -572,9 +572,9 @@ def run_diff(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Optimised Python port of sp_run_diff")
     parser.add_argument("--table",     required=True)
-    parser.add_argument("--old_conn",  default="mssql+pyodbc://sa:ndADMIN2025@localhost:1433/Primerecord_latest?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes")
-    parser.add_argument("--new_conn",  default="mssql+pyodbc://NDAIReadOnly:iUMKX2p7Egr1GM9J@172.22.150.233:1433/PrimeRecord1753?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes")
-    parser.add_argument("--diff_conn", default="mssql+pyodbc://sa:ndADMIN2025@localhost:1433/Primerecord_diff_staging?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes")
+    parser.add_argument("--old_conn",  default="mssql+pyodbc://sa:ndADMIN2025@localhost:1437/mobiledoc_base_0601?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes")
+    parser.add_argument("--new_conn",  default="mssql+pyodbc://sa:ndADMIN2025@localhost:1437/mobiledoc_latest?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes")
+    parser.add_argument("--diff_conn", default="mssql+pyodbc://sa:ndADMIN2025@localhost:1437/mobiledoc_diff_staging?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes")
     parser.add_argument("--schema",    default="dbo")
     args = parser.parse_args()
 

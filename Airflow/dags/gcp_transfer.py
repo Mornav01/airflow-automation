@@ -21,15 +21,15 @@ MYSQL_HOST     = "localhost"
 MYSQL_PORT     = "3306"
 MYSQL_USER     = "ndadmin"
 MYSQL_PASSWORD = "ndADMIN@2025"
-MYSQL_SCHEMA   = "deidentified_diff_merged"
+MYSQL_SCHEMA   = "deidentified_mobiledoc_diff_merged"
 MYSQLDUMP_PATH = "/opt/homebrew/opt/mysql@8.0/bin/mysqldump"
 MYSQL_PATH     = "/opt/homebrew/opt/mysql@8.0/bin/mysql"
 
-GCS_BUCKET     = "nd-platform-jwm"
+GCS_BUCKET     = "nd-platform-arizona"
 GCS_PREFIX     = "EHR/nd_incremental"
 
-OUTPUT_BASE    = "/Users/ndaijwm/Desktop/airflow_incremental/airflow-automation/dumps"
-STATE_DIR      = "/Users/ndaijwm/Desktop/airflow_incremental/airflow-automation/state"
+OUTPUT_BASE    = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/dumps"
+STATE_DIR      = "/Users/ndaicnsarizona/Desktop/production_state_incremental/state"
 
 default_args = {
     "owner": "airflow",

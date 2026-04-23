@@ -602,9 +602,9 @@ def run_diff(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Python port of sp_run_diff")
     parser.add_argument("--table",     required=True,  help="Table name")
-    parser.add_argument("--old_conn",  default="mssql+pyodbc://sa:password@localhost:1433/primerecord_latest?driver=ODBC+Driver+17+for+SQL+Server",  help="SQLAlchemy conn string for OldDB")
-    parser.add_argument("--new_conn",  default="mssql+pyodbc://user:password@172.81.137.128:1433/PrimeRecord1047_Copy?driver=ODBC+Driver+17+for+SQL+Server",  help="SQLAlchemy conn string for NewDB")
-    parser.add_argument("--diff_conn", default="mssql+pyodbc://sa:password@localhost:1433/PrimeRecord_diff_staging?driver=ODBC+Driver+17+for+SQL+Server",  help="SQLAlchemy conn string for DiffDB")
+    parser.add_argument("--old_conn",  default="mssql+pyodbc://sa:ndADMIN2025@localhost:1437/mobiledoc_base_0601?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes")
+    parser.add_argument("--new_conn",  default="mssql+pyodbc://sa:ndADMIN2025@localhost:1437/mobiledoc_latest?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes")
+    parser.add_argument("--diff_conn", default="mssql+pyodbc://sa:ndADMIN2025@localhost:1437/mobiledoc_diff_staging?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes")
     parser.add_argument("--schema",    default="dbo",  help="Schema name (default: dbo)")
     args = parser.parse_args()
 
