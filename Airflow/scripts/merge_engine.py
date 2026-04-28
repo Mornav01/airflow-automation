@@ -5,11 +5,12 @@ import logging
 import traceback
 from typing import List, Dict
 import pandas as pd
-import numpy as np
 
 
 BATCH_INSERT_CHUNK = 1000
 DEACTIVATE_CHUNK   = 5000
+
+_NULL_LIKE_STRINGS = ["0000-00-00 00:00:00", "0000-00-00", "NaT", "nat", "NaN", "None"]
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -20,7 +21,8 @@ def sanitize_df(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     df = df.astype(object)
-    df = df.replace({pd.NaT: None, np.nan: None})
+    df = df.where(pd.notna(df), None)
+    df = df.replace(_NULL_LIKE_STRINGS, None)
     return df
 
 
@@ -41,7 +43,7 @@ def _raw_bulk_insert(engine: Engine, table: str, df: pd.DataFrame,
     cols = list(df.columns)
 
     if db_type == "mssql":
-        col_sql      = ",".join(cols)
+        col_sql      = ",".join(f"[{c}]" for c in cols)
         placeholders = ",".join(["?" for _ in cols])
         sql          = f"INSERT INTO {table} ({col_sql}) VALUES ({placeholders})"
     else:
@@ -106,11 +108,11 @@ def _raw_deactivate(engine: Engine, table: str, pk_df: pd.DataFrame,
 
 def _deactivate_mssql(engine: Engine, table: str, pk_df: pd.DataFrame,
                       pk_cols: List[str], chunk: int):
-    col_defs      = ", ".join([f"{c} NVARCHAR(255) NOT NULL" for c in pk_cols])
-    pk_constraint = ", ".join(pk_cols)
+    col_defs      = ", ".join([f"[{c}] NVARCHAR(255) NOT NULL" for c in pk_cols])
+    pk_constraint = ", ".join(f"[{c}]" for c in pk_cols)
     ins_ph        = ", ".join(["?" for _ in pk_cols])
     ins_sql       = f"INSERT INTO #tmp_deact ({pk_constraint}) VALUES ({ins_ph})"
-    join_cond     = " AND ".join([f"m.{c} = t.{c}" for c in pk_cols])
+    join_cond     = " AND ".join([f"m.[{c}] = t.[{c}]" for c in pk_cols])
 
     rows  = [tuple(r) for r in pk_df.itertuples(index=False, name=None)]
     total = len(rows)
@@ -219,7 +221,7 @@ def _ensure_active_index(engine: Engine, db: str, table: str,
             logging.info("[_ensure_active_index] [%s] Index %s already exists — skipping", table, index_name)
             return
 
-        col_list = ", ".join(index_cols)
+        col_list = ", ".join(f"[{c}]" for c in index_cols)
         with engine.begin() as conn:
             conn.execute(text(f"""
                 CREATE NONCLUSTERED INDEX {index_name}
@@ -427,7 +429,7 @@ class MergeEngine:
             if not pk_cols:
                 return pd.DataFrame(), diff_df
             main_keys = pd.read_sql(
-                f"SELECT {','.join(pk_cols)} FROM {self.main_db}.dbo.{table} WHERE nd_ActiveFlag='Y'",
+                f"SELECT {','.join(f'[{c}]' for c in pk_cols)} FROM {self.main_db}.dbo.{table} WHERE nd_ActiveFlag='Y'",
                 self.main_engine
             )
 
@@ -764,7 +766,7 @@ class MergeEngine:
                 SET t.nd_ActiveFlag = 'N'
             """
         else:
-            pk_expr = ",".join(pk_cols)
+            pk_expr = ",".join(f"[{c}]" for c in pk_cols)
             sql = f"""
                 UPDATE t SET t.nd_ActiveFlag = 'N'
                 FROM {table} t

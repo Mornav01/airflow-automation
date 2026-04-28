@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import subprocess
 from datetime import timedelta
 
@@ -16,13 +17,16 @@ from airflow.task.trigger_rule import TriggerRule
 local_tz = pendulum.timezone("Asia/Kolkata")
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.abspath(os.path.join(SCRIPT_DIR, "..", "scripts")))
+
+from db_config import DEID_POST_PROCESS_TABLES_CSV  # noqa: E402
+
 PYTHON_EXECUTABLE = os.environ.get("AIRFLOW_PYTHON", "python")
 
 # Default config paths — stored inside scripts/configs/
 _CONFIGS_DIR    = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "scripts", "configs"))
 _DEFAULT_CONFIG = os.path.join(_CONFIGS_DIR, "config_incremental.yaml")
-_INPUT_DIR      = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", "input"))
-_DEFAULT_TABLES = os.path.join(_INPUT_DIR, "tables_family.csv")
+_DEFAULT_TABLES = DEID_POST_PROCESS_TABLES_CSV
 
 default_args = {
     "owner": "airflow",

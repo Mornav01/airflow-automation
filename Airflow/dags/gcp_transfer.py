@@ -4,6 +4,7 @@ import csv
 import hashlib
 import json
 import os
+import sys
 import subprocess
 from datetime import datetime, timedelta
 
@@ -17,19 +18,22 @@ from airflow.providers.standard.operators.python import PythonOperator
 
 local_tz = pendulum.timezone("Asia/Kolkata")
 
-MYSQL_HOST     = "localhost"
-MYSQL_PORT     = "3306"
-MYSQL_USER     = "ndadmin"
-MYSQL_PASSWORD = "ndADMIN@2025"
-MYSQL_SCHEMA   = "deidentified_mobiledoc_diff_merged"
-MYSQLDUMP_PATH = "/opt/homebrew/opt/mysql@8.0/bin/mysqldump"
-MYSQL_PATH     = "/opt/homebrew/opt/mysql@8.0/bin/mysql"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.abspath(os.path.join(SCRIPT_DIR, "..", "scripts")))
 
-GCS_BUCKET     = "nd-platform-arizona"
-GCS_PREFIX     = "EHR/nd_incremental"
-
-OUTPUT_BASE    = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/dumps"
-STATE_DIR      = "/Users/ndaicnsarizona/Desktop/production_state_incremental/state"
+from db_config import (  # noqa: E402
+    STATE_DIR,
+    GCP_TRANSFER_MYSQL_HOST     as MYSQL_HOST,
+    GCP_TRANSFER_MYSQL_PORT     as MYSQL_PORT,
+    GCP_TRANSFER_MYSQL_USER     as MYSQL_USER,
+    GCP_TRANSFER_MYSQL_PASSWORD as MYSQL_PASSWORD,
+    GCP_TRANSFER_MYSQL_SCHEMA   as MYSQL_SCHEMA,
+    GCP_TRANSFER_MYSQLDUMP_PATH as MYSQLDUMP_PATH,
+    GCP_TRANSFER_MYSQL_PATH     as MYSQL_PATH,
+    GCP_TRANSFER_GCS_BUCKET     as GCS_BUCKET,
+    GCP_TRANSFER_GCS_PREFIX     as GCS_PREFIX,
+    GCP_TRANSFER_OUTPUT_BASE    as OUTPUT_BASE,
+)
 
 default_args = {
     "owner": "airflow",

@@ -236,6 +236,7 @@ def export_csv(states, csv_path):
                 all_keys.append(k)
                 seen.add(k)
 
+    os.makedirs(os.path.dirname(csv_path), exist_ok=True)
     with open(csv_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=all_keys, extrasaction="ignore")
         writer.writeheader()
@@ -249,7 +250,7 @@ def main():
     parser.add_argument("--state_dir",   default=STATE_DIRECTORY, help="Path to state directory")
     parser.add_argument("--json",        action="store_true",      help="Output raw JSON instead of formatted text")
     parser.add_argument("--failed_only", action="store_true",      help="Only print failure sections")
-    parser.add_argument("--csv", default="/Users/ndaijwm/Desktop/airflow_incremental/airflow-automation/state/summary/summary.csv", help="Export per-table CSV to this path")
+    parser.add_argument("--csv", default=os.path.join(STATE_DIRECTORY, "summary", "summary.csv"), help="Export per-table CSV to this path")
     parser.add_argument("--tables",      nargs="+", metavar="TABLE", help="Only summarise these specific tables")
     parser.add_argument("--tables-csv",  metavar="FILE",           help="CSV file whose first column lists tables to include")
     args = parser.parse_args()
