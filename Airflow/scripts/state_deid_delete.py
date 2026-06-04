@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-DAG 3 — Task 3: Delete Processed Original Data from original_diff_merged (MSSQL)
+DAG 3 — Task 3: Delete Processed Original Data from original_diff_merged
 
 The pipeline flow is:
     1. Diff + Merge    → accumulates original data into original_diff_merged
@@ -98,7 +98,7 @@ class StateManager:
 
 def delete_old_diff_rows(table_name, cutoff_date, engine):
     """
-    Delete processed original rows from original_diff_merged (MSSQL) where
+    Delete processed original rows from original_diff_merged where
     nd_extracted_date <= cutoff_date (last_processed_date).
 
     These rows have already been deidentified and merged into the main
@@ -108,9 +108,13 @@ def delete_old_diff_rows(table_name, cutoff_date, engine):
     """
     import sqlalchemy as sa
 
+    preparer = engine.dialect.identifier_preparer
+    quoted_table = preparer.quote(table_name)
+    quoted_col   = preparer.quote(EXTRACTED_DATE_COLUMN)
+
     sql = sa.text(
-        f"DELETE FROM [{table_name}] "
-        f"WHERE [{EXTRACTED_DATE_COLUMN}] <= :cutoff"
+        f"DELETE FROM {quoted_table} "
+        f"WHERE {quoted_col} <= :cutoff"
     )
 
     with engine.begin() as conn:

@@ -1,0 +1,71 @@
+dob:
+  Birthdate:
+    masking_value: "((DOB))"
+
+mask:
+  SSN:
+    masking_value: "((SSN))"
+  City:
+    masking_value: "((CITY))"
+  Last:
+    masking_value: "((LAST))"
+  First:
+    masking_value: "((FIRST))"
+  State:
+    masking_value: "((STATE))"
+  Middle:
+    masking_value: "((MIDDLE))"
+  Phone1:
+    masking_value: "((PHONE1))"
+  Phone2:
+    masking_value: "((PHONE2))"
+  Phone3:
+    masking_value: "((PHONE3))"
+  Address1:
+    masking_value: "((ADDRESS1))"
+  Address2:
+    masking_value: "((ADDRESS2))"
+  EmpOccup:
+    masking_value: "((EMP_OCCUPATION))"
+  Nickname:
+    masking_value: "((NICKNAME))"
+  BirthTime:
+    masking_value: "((BIRTHTIME))"
+  Birthdate:
+    masking_value: "((DOB))"
+  EmployerId:
+    masking_value: "((EMPLOYER_ID))"
+  SchoolName:
+    masking_value: "((SCHOOL_NAME))"
+  EMailAddress:
+    masking_value: "((EMAIL))"
+  AlternateCity:
+    masking_value: "((ALT_CITY))"
+  PreviousLastName:
+    masking_value: "((PREV_LAST))"
+  AlternateAddress1:
+    masking_value: "((ALT_ADDRESS1))"
+  AlternateAddress2:
+    masking_value: "((ALT_ADDRESS2))"
+  PreviousFirstName:
+    masking_value: "((PREV_FIRST))"
+  PreviousMiddleName:
+    masking_value: "((PREV_MIDDLE))"
+  MedicalRecordNumber:
+    masking_value: "((MRN))"
+
+combine:
+  fullname:
+    combine:
+      - First
+      - Middle
+      - Last
+    masking_value: "((FULLNAME))"
+
+zipcode:
+  Zip:
+    masking_value: "((ZIP))"
+
+replace_value:
+  - old_value: "noran"
+    new_value: "((FacilityName))"

@@ -1,0 +1,71 @@
+- table_name: master_insurance_table
+  config:
+    SSN:
+      min_length: 2
+      masking_value: "((SSN))"
+    City:
+      min_length: 2
+      masking_value: "((City))"
+    Last:
+      min_length: 2
+      masking_value: "((Last))"
+    First:
+      min_length: 2
+      masking_value: "((First))"
+    Middle:
+      min_length: 2
+      masking_value: "((Middle))"
+    Phone1:
+      min_length: 2
+      masking_value: "((Phone1))"
+    Phone2:
+      min_length: 2
+      masking_value: "((Phone2))"
+    GroupId:
+      min_length: 2
+      masking_value: "((GroupId))"
+    Address1:
+      min_length: 2
+      masking_value: "((Address1))"
+    Address2:
+      min_length: 2
+      masking_value: "((Address2))"
+    CopayAmt:
+      min_length: 2
+      masking_value: "((CopayAmt))"
+    Birthdate:
+      min_length: 2
+      masking_value: "((Birthdate))"
+    GroupName:
+      min_length: 2
+      masking_value: "((GroupName))"
+    InsuredId:
+      min_length: 2
+      masking_value: "((InsuredId))"
+    MediGapId:
+      min_length: 2
+      masking_value: "((MediGapId))"
+    Deductible:
+      min_length: 2
+      masking_value: "((Deductible))"
+    EmployerId:
+      min_length: 2
+      masking_value: "((EmployerId))"
+    CoInsurance:
+      min_length: 2
+      masking_value: "((CoInsurance))"
+    ClaimOfficeNo:
+      min_length: 2
+      masking_value: "((ClaimOfficeNo))"
+    ChampusGradeMId:
+      min_length: 2
+      masking_value: "((ChampusGradeMId))"
+    ChampusBranchMId:
+      min_length: 2
+      masking_value: "((ChampusBranchMId))"
+    PatientInsuranceId:
+      min_length: 2
+      masking_value: "((PatientInsuranceId))"
+    InsuranceCarriersId:
+      min_length: 2
+      masking_value: "((InsuranceCarriersId))"

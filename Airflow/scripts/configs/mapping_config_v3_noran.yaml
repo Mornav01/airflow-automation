@@ -1,0 +1,53 @@
+# V3 mapping config for the Noran project.
+# Point sql_file paths to absolute paths on the Airflow worker.
+
+patient:
+  sql_file: /opt/airflow/Airflow/scripts/sql/patient_noran.sql
+  # All identifier_columns must be 1:1 with each other (validated at runtime).
+  identifier_columns:
+    - patientid
+    - profileid
+    - pid
+  # nd_patient_id starts at this value when the mapping table is empty.
+  base_nd_id: 100000000000000
+
+child_tables:
+
+  - name: encounter
+    sql_file: /opt/airflow/Airflow/scripts/sql/encounter_noran.sql
+    # patient_ref_cols: columns returned by the child SQL that link to a patient.
+    # Tried in order — first non-null match wins.
+    patient_ref_cols:
+      - patientid
+      - profileid
+    source_id_col: encounter_id      # source system's encounter identifier column alias
+    date_col: encounter_date          # date column alias in the child SQL
+    nd_id_suffix_len: 4               # nd_encounter_id = {nd_patient_id}0001, 0002, ...
+    mapping_table: encounter_mapping_table
+    nd_id_col: nd_encounter_id
+
+  - name: appointment
+    sql_file: /opt/airflow/Airflow/scripts/sql/appointment_noran.sql
+    patient_ref_cols:
+      - patientid
+      - profileid
+    source_id_col: appointment_id
+    date_col: appointment_date
+    nd_id_suffix_len: 4               # nd_appointment_id = {nd_patient_id}0001, 0002, ...
+    mapping_table: appointment_mapping_table
+    nd_id_col: nd_appointment_id
+
+  - name: chart
+    sql_file: /opt/airflow/Airflow/scripts/sql/chart_noran.sql
+    patient_ref_cols:
+      - patientid
+      - profileid
+      - pid
+    source_id_col: chart_id
+    date_col: chart_date
+    nd_id_suffix_len: 5               # nd_chart_id = {nd_patient_id}00001, 00002, ...
+    mapping_table: chart_mapping_table
+    nd_id_col: nd_chart_id
+    # use_len_guard: treat any existing nd_chart_id whose digit count is ≤ 15
+    # (i.e. equal to nd_patient_id alone) as uninitialised and restart from base.
+    use_len_guard: true

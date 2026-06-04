@@ -75,3 +75,73 @@ GCP_TRANSFER_MYSQL_PATH     = os.environ["GCP_TRANSFER_MYSQL_PATH"]
 GCP_TRANSFER_GCS_BUCKET     = os.environ["GCP_TRANSFER_GCS_BUCKET"]
 GCP_TRANSFER_GCS_PREFIX     = os.environ["GCP_TRANSFER_GCS_PREFIX"]
 GCP_TRANSFER_OUTPUT_BASE    = os.environ["GCP_TRANSFER_OUTPUT_BASE"]
+
+# ── V2 Mapping (dict-style) ───────────────────────────────────
+V2_MAPPING_MSSQL_CONN = {
+    "server":   os.environ["V2_MAPPING_MSSQL_SERVER"],
+    "port":     int(os.environ["V2_MAPPING_MSSQL_PORT"]),
+    "database": os.environ["V2_MAPPING_MSSQL_DATABASE"],
+    "user":     os.environ["V2_MAPPING_MSSQL_USER"],
+    "password": os.environ["V2_MAPPING_MSSQL_PASSWORD"],
+}
+V2_MAPPING_MYSQL_CONN = {
+    "host":     os.environ["V2_MAPPING_MYSQL_HOST"],
+    "database": os.environ["V2_MAPPING_MYSQL_DATABASE"],
+    "user":     os.environ["V2_MAPPING_MYSQL_USER"],
+    "password": os.environ["V2_MAPPING_MYSQL_PASSWORD"],
+}
+
+# ── V2 Master recreate (connection string style) ──────────────
+V2_MASTER_MSSQL_CONN_STR         = os.environ["V2_MASTER_MSSQL_CONN"]
+V2_MASTER_MYSQL_CONN_STR         = os.environ["V2_MASTER_MYSQL_CONN"]
+V2_MASTER_MAPPING_MYSQL_CONN_STR = os.environ["V2_MASTER_MAPPING_MYSQL_CONN"]
+
+# ── V2 SQL files ──────────────────────────────────────────────
+V2_MAPPING_SQL_FILE          = os.environ["V2_MAPPING_SQL_FILE"]
+V2_MASTER_PII_SQL_FILE       = os.environ["V2_MASTER_PII_SQL_FILE"]
+V2_MASTER_INSURANCE_SQL_FILE = os.environ["V2_MASTER_INSURANCE_SQL_FILE"]
+
+# ── V2 identifier columns ─────────────────────────────────────
+V2_MAPPING_PATIENT_IDENTIFIER_COLUMNS  = [
+    c.strip() for c in os.environ["V2_MAPPING_PATIENT_IDENTIFIER_COLUMNS"].split(",")
+]
+V2_MASTER_PII_DATA_JOIN_COLUMN         = os.environ["V2_MASTER_PII_DATA_JOIN_COLUMN"]
+V2_MASTER_INSURANCE_JOIN_COLUMN        = os.environ["V2_MASTER_INSURANCE_JOIN_COLUMN"]
+
+# ── AWS transfer (aws_transfer.py) ───────────────────────────────
+AWS_TRANSFER_MYSQL_HOST            = os.environ["AWS_TRANSFER_MYSQL_HOST"]
+AWS_TRANSFER_MYSQL_PORT            = os.environ["AWS_TRANSFER_MYSQL_PORT"]
+AWS_TRANSFER_MYSQL_USER            = os.environ["AWS_TRANSFER_MYSQL_USER"]
+AWS_TRANSFER_MYSQL_PASSWORD        = os.environ["AWS_TRANSFER_MYSQL_PASSWORD"]
+AWS_TRANSFER_MYSQL_SCHEMA          = os.environ["AWS_TRANSFER_MYSQL_SCHEMA"]
+AWS_TRANSFER_MYSQLDUMP_PATH        = os.environ["AWS_TRANSFER_MYSQLDUMP_PATH"]
+AWS_TRANSFER_MYSQL_PATH            = os.environ["AWS_TRANSFER_MYSQL_PATH"]
+AWS_TRANSFER_S3_BUCKET             = os.environ["AWS_TRANSFER_S3_BUCKET"]
+AWS_TRANSFER_S3_PREFIX             = os.environ["AWS_TRANSFER_S3_PREFIX"]
+AWS_TRANSFER_S3_REGION             = os.environ["AWS_TRANSFER_S3_REGION"]
+AWS_TRANSFER_AWS_ACCESS_KEY_ID     = os.environ["AWS_TRANSFER_AWS_ACCESS_KEY_ID"]
+AWS_TRANSFER_AWS_SECRET_ACCESS_KEY = os.environ["AWS_TRANSFER_AWS_SECRET_ACCESS_KEY"]
+AWS_TRANSFER_OUTPUT_BASE           = os.environ["AWS_TRANSFER_OUTPUT_BASE"]
+
+# ── V3 Mapping connections & config ──────────────────────────────
+V3_MAPPING_MSSQL_CONN = {
+    "server":   os.environ["V3_MAPPING_MSSQL_SERVER"],
+    "port":     int(os.environ["V3_MAPPING_MSSQL_PORT"]),
+    "database": os.environ["V3_MAPPING_MSSQL_DATABASE"],
+    "user":     os.environ["V3_MAPPING_MSSQL_USER"],
+    "password": os.environ["V3_MAPPING_MSSQL_PASSWORD"],
+}
+V3_MAPPING_MYSQL_CONN = {
+    "host":     os.environ["V3_MAPPING_MYSQL_HOST"],
+    "database": os.environ["V3_MAPPING_MYSQL_DATABASE"],
+    "user":     os.environ["V3_MAPPING_MYSQL_USER"],
+    "password": os.environ["V3_MAPPING_MYSQL_PASSWORD"],
+}
+V3_MAPPING_CONFIG_FILE = os.environ["V3_MAPPING_CONFIG_FILE"]
+
+# ── DAG Schedules (None = manual trigger only) ──────────────────
+DIFF_MERGE_SCHEDULE        = os.environ.get("DIFF_MERGE_SCHEDULE") or None
+DEID_SCHEDULE              = os.environ.get("DEID_SCHEDULE") or None
+DEID_POST_PROCESS_SCHEDULE = os.environ.get("DEID_POST_PROCESS_SCHEDULE") or None
+AWS_TRANSFER_SCHEDULE      = os.environ.get("AWS_TRANSFER_SCHEDULE") or None
+GCP_TRANSFER_SCHEDULE      = os.environ.get("GCP_TRANSFER_SCHEDULE") or None

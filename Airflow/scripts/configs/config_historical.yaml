@@ -1,0 +1,92 @@
+# ── Source & Destination Databases ──────────────────────────────────
+source_db:
+  type: mysql
+  host: localhost
+  port: 3306
+  database: centricityps_original_16oct
+  username: ndadmin
+  password: ndADMIN%402025
+
+destination_db:
+  type: mysql
+  host: localhost
+  port: 3306
+  database: deidentified_merge
+  username: ndadmin
+  password: ndADMIN%402025
+
+mappings_db:
+  type: mysql
+  host: localhost
+  port: 3306
+  database: mapping_prod
+  username: ndadmin
+  password: ndADMIN%402025
+
+# ── Namespace Key ────────────────────────────────────────────────────
+config_key: historical
+
+# ── State Storage ────────────────────────────────────────────────────
+state_db_path: /Users/ndainoran/airflow_latest/airflow-automation/deid_runtime/state.db
+failed_rows_db_path: /Users/ndainoran/airflow_latest/airflow-automation/deid_runtime/failed_rows.db
+# .deid_staging/ is auto-placed next to state.db (same folder)
+
+# ── Redis ────────────────────────────────────────────────────────────
+redis_url: redis://localhost:6379/0
+
+# ── De-Identification Settings ───────────────────────────────────────
+deidentification:
+  batch_size: 50000
+  date_offset_days: 34
+  patient_id_prefix: 10000000
+  random_seed: 42
+
+# ── Tables & Rules ───────────────────────────────────────────────────
+rules_csv: /Users/ndainoran/airflow_latest/airflow-automation/Airflow/scripts/configs/phi_rules_v2.csv
+# ── Mapping Tables ───────────────────────────────────────────────────
+mapping_tables:
+  patient:
+    source_column: patient_id
+    destination_column: nd_patient_id
+    identifier_columns:
+      - patientid   # update to match actual columns in patient_mapping_table
+      - pid
+      - profileid
+  encounter:
+    source_column: encounter_id
+    destination_column: nd_encounter_id
+    reference: patient
+
+# ── Pipeline Phases ──────────────────────────────────────────────────
+phases:
+  - setup
+  - deidentify
+
+# ── Worker Settings ──────────────────────────────────────────────────
+workers:
+  fetchers: 2
+  processors: 16
+  max_retries: 1
+  task_timeout: 3600
+
+
+# ── Logging ──────────────────────────────────────────────────────────
+logging:
+  log_dir: /Users/ndainoran/airflow_latest/airflow-automation/deid_runtime/logs/historical
+
+# ── Quality Control ──────────────────────────────────────────────────
+qc:
+  sample_size: 100
+  scan_for_residual_pii: true
+
+# ── PII / Notes Config ───────────────────────────────────────────────
+pii_db:
+  master_connection_str: "mysql+pymysql://ndadmin:ndADMIN%402025@localhost:3306/master_prod"
+  secondary_pii_connection_str: "mysql+pymysql://ndadmin:ndADMIN%402025@localhost:3306/master_prod"
+
+secondary_pii_config_path: /Users/ndainoran/airflow_latest/airflow-automation/Airflow/scripts/configs/secondary_pii_config_v2.yaml
+
+pii_config_path: /Users/ndainoran/airflow_latest/airflow-automation/Airflow/scripts/configs/pii_config_v2.yaml
+
+# ── Reference Mapping Joins ───────────────────────────────────────────
+reference_mappings_path: /Users/ndainoran/airflow_latest/airflow-automation/Airflow/scripts/configs/reference_mappings_v2.yaml

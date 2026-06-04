@@ -1,0 +1,34 @@
+# Reference mapping join conditions per table.
+# Each table key maps to a JoinCondition that resolves an indirect patient/encounter ID
+# by walking a chain of reference tables in the source database.
+#
+# Structure:
+#   <table_name>:
+#     source_table: <table being deidentified>
+#     destination_column: <column name to resolve (e.g. PatientID)>
+#     destination_column_type: patient_id | encounter_id
+#     conditions:
+#       - source_column: <column in current table to join from>
+#         reference_table: <table to look up>
+#         column_name: <join key in the reference table>
+#
+# Multi-hop example: add more entries under conditions in order.
+
+DOCDATA2:
+  source_table: DOCDATA2
+  destination_column: PID
+  destination_column_type: PATIENT_PID
+  conditions:
+    - source_column: SDID
+      reference_table: DOCUMENT
+      column_name: SDID
+
+
+DOCDATA:
+  source_table: DOCDATA
+  destination_column: PID
+  destination_column_type: PATIENT_PID
+  conditions:
+    - source_column: SDID
+      reference_table: DOCUMENT
+      column_name: SDID
