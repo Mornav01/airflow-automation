@@ -141,6 +141,11 @@ V3_MAPPING_MYSQL_CONN = {
 }
 V3_MAPPING_CONFIG_FILE = os.environ["V3_MAPPING_CONFIG_FILE"]
 
+# ── V3 Master recreate — connection strings ───────────────────────
+V3_MASTER_SOURCE_CONN_STR  = os.environ["V3_MASTER_SOURCE_CONN"]    # source DB (mssql+pymssql:// or mysql+pymysql://)
+V3_MASTER_MYSQL_CONN_STR   = os.environ["V3_MASTER_MYSQL_CONN"]     # destination MySQL (where master tables are written)
+V3_MASTER_MAPPING_CONN_STR = os.environ["V3_MASTER_MAPPING_CONN"]   # mapping MySQL (where patient_mapping_table lives)
+
 # ── DAG Schedules (None = manual trigger only) ──────────────────
 DIFF_MERGE_SCHEDULE        = os.environ.get("DIFF_MERGE_SCHEDULE") or None
 DEID_SCHEDULE              = os.environ.get("DEID_SCHEDULE") or None

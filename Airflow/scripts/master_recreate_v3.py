@@ -8,6 +8,9 @@ MySQL master tables with rotation (old → _old).
 Uses the same YAML config file as incremental_mapping_update_v3.py.
 Run AFTER the mapping script so patient_mapping_table is populated.
 
+All DB connections are SQLAlchemy connection strings — the dialect prefix
+(mssql+pymssql:// or mysql+pymysql://) determines the driver automatically.
+
 Usage:
     python master_recreate_v3.py --config /path/to/mapping_master_config.yaml
     python master_recreate_v3.py --config /path/to/mapping_master_config.yaml --dry-run
@@ -22,7 +25,6 @@ from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
 
 import pandas as pd
-import mysql.connector
 from sqlalchemy import create_engine, text
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -66,26 +68,27 @@ class MasterStateManager:
 
 # ─── Patient map loading ──────────────────────────────────────────────────────
 
-def load_patient_maps_from_mysql(mysql_conn_params, identifier_columns):
+def load_patient_maps_from_mysql(mapping_conn_str, identifier_columns):
     """
     Load patient_mapping_table into per-column dicts: {col → {val → nd_patient_id}}.
     Same structure as _load_patient_maps_from_db in the mapping script.
     """
-    conn = mysql.connector.connect(**mysql_conn_params)
-    cursor = conn.cursor(dictionary=True)
     id_cols_csv = ", ".join(f"`{c}`" for c in identifier_columns)
-    cursor.execute(f"SELECT {id_cols_csv}, nd_patient_id FROM patient_mapping_table")
-    rows = cursor.fetchall()
-    cursor.close()
-    conn.close()
+    engine = create_engine(mapping_conn_str)
+    with engine.connect() as conn:
+        df = pd.read_sql(
+            text(f"SELECT {id_cols_csv}, nd_patient_id FROM patient_mapping_table"),
+            conn,
+        )
 
     patient_maps_by_col = {col: {} for col in identifier_columns}
-    for row in rows:
+    for _, row in df.iterrows():
         nd_pid = row["nd_patient_id"]
         for col in identifier_columns:
             val = row.get(col)
-            if val is not None:
+            if val is not None and not pd.isna(val):
                 patient_maps_by_col[col][val] = nd_pid
+
     logging.info(
         f"Loaded {len(next(iter(patient_maps_by_col.values()), {}))} patients "
         f"across {len(identifier_columns)} identifier columns."
@@ -118,31 +121,18 @@ def resolve_nd_patient_ids_df(df, patient_maps_by_col, join_cols):
 
 # ─── Source query ─────────────────────────────────────────────────────────────
 
-def execute_source_query_df(source_type, conn_params, sql_file_path):
-    """Execute a SELECT query and return results as a pandas DataFrame."""
-    query = Path(sql_file_path).read_text()
-    if source_type == "mssql":
-        import pymssql
-        conn = pymssql.connect(
-            server=conn_params["host"],
-            port=conn_params["port"],
-            database=conn_params["database"],
-            user=conn_params["user"],
-            password=conn_params["password"],
-        )
-        cursor = conn.cursor(as_dict=True)
-        cursor.execute(query)
-        rows = cursor.fetchall()
-        conn.close()
-        return pd.DataFrame(rows)
-    else:
-        conn = mysql.connector.connect(**conn_params)
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute(query)
-        rows = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        return pd.DataFrame(rows)
+def execute_source_query_df(source_conn_str, sql_file_path):
+    """
+    Execute a SELECT query against the source DB and return results as a DataFrame.
+    The SQLAlchemy dialect in source_conn_str determines the driver automatically:
+      mssql+pymssql://...  → MSSQL
+      mysql+pymysql://...  → MySQL
+    """
+    query  = text(Path(sql_file_path).read_text())
+    engine = create_engine(source_conn_str)
+    with engine.connect() as conn:
+        df = pd.read_sql(query, conn)
+    return df
 
 
 # ─── Table rotation ───────────────────────────────────────────────────────────
@@ -168,7 +158,7 @@ def rotate_table(mysql_engine, table_name):
 # ─── Single master table transfer ─────────────────────────────────────────────
 
 def transfer_master_table(
-    source_type, source_conn_params, mysql_conn_params,
+    source_conn_str, mysql_conn_str,
     table_cfg, patient_maps_by_col, dry_run=False,
 ):
     name         = table_cfg["name"]
@@ -177,13 +167,12 @@ def transfer_master_table(
     target_table = table_cfg["target_table"]
 
     logging.info(f"[{name}] Fetching source data from SQL file.")
-    df = execute_source_query_df(source_type, source_conn_params, sql_file)
+    df = execute_source_query_df(source_conn_str, sql_file)
     logging.info(f"[{name}] Fetched {len(df)} rows.")
 
     df.drop_duplicates(inplace=True)
     logging.info(f"[{name}] {len(df)} rows after dedup.")
 
-    # Validate at least one join_col is present in the result
     present = [c for c in join_cols if c in df.columns]
     if not present:
         raise ValueError(
@@ -204,11 +193,7 @@ def transfer_master_table(
         logging.info(f"[DRY RUN] [{name}] Would write {len(df)} rows to {target_table}.")
         return {"success": True, "row_count": len(df), "unmapped_rows": int(unmapped), "dry_run": True}
 
-    mysql_url    = (
-        f"mysql+mysqlconnector://{mysql_conn_params['user']}:{mysql_conn_params['password']}"
-        f"@{mysql_conn_params['host']}/{mysql_conn_params['database']}"
-    )
-    mysql_engine = create_engine(mysql_url)
+    mysql_engine = create_engine(mysql_conn_str)
 
     rotate_table(mysql_engine, target_table)
 
@@ -226,23 +211,22 @@ def transfer_master_table(
 
 # ─── Top-level ETL ────────────────────────────────────────────────────────────
 
-def run_master_etl(config, source_conn_params, mysql_conn_params, dry_run=False):
+def run_master_etl(config, source_conn_str, mysql_conn_str, mapping_conn_str, dry_run=False):
     master_tables = config.get("master_tables", [])
     if not master_tables:
         logging.warning("No master_tables defined in config. Nothing to do.")
         return {}
 
     identifier_columns = config["patient"]["identifier_columns"]
-    source_type        = config["source_type"]
 
-    patient_maps_by_col = load_patient_maps_from_mysql(mysql_conn_params, identifier_columns)
+    patient_maps_by_col = load_patient_maps_from_mysql(mapping_conn_str, identifier_columns)
 
     results = {}
     for table_cfg in master_tables:
         name = table_cfg["name"]
         logging.info(f"Processing master table: {name}")
         result = transfer_master_table(
-            source_type, source_conn_params, mysql_conn_params,
+            source_conn_str, mysql_conn_str,
             table_cfg, patient_maps_by_col, dry_run,
         )
         results[name] = result
@@ -258,12 +242,16 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Log actions without writing to DB")
     args = parser.parse_args()
 
-    # Reuse load_config from the mapping script (validates master_tables too)
     sys.path.insert(0, os.path.dirname(__file__))
     from incremental_mapping_update_v3 import load_config
     config = load_config(args.config)
 
-    from db_config import STATE_DIR, V3_MAPPING_SOURCE_CONN, V3_MAPPING_MYSQL_CONN
+    from db_config import (
+        STATE_DIR,
+        V3_MASTER_SOURCE_CONN_STR,
+        V3_MASTER_MYSQL_CONN_STR,
+        V3_MASTER_MAPPING_CONN_STR,
+    )
 
     state_dir = os.path.join(STATE_DIR, "mapping_master_v3")
     setup_logging(state_dir)
@@ -272,7 +260,6 @@ def main():
     state         = state_manager.load()
     today         = datetime.now(IST).date().isoformat()
 
-    # Check if all master tables already ran successfully today
     master_tables = config.get("master_tables", [])
     if not args.dry_run and master_tables:
         all_done = all(
@@ -287,7 +274,13 @@ def main():
     logging.info("Starting V3 Master Recreate ETL")
 
     try:
-        results = run_master_etl(config, V3_MAPPING_SOURCE_CONN, V3_MAPPING_MYSQL_CONN, args.dry_run)
+        results = run_master_etl(
+            config,
+            V3_MASTER_SOURCE_CONN_STR,
+            V3_MASTER_MYSQL_CONN_STR,
+            V3_MASTER_MAPPING_CONN_STR,
+            args.dry_run,
+        )
         for name, result in results.items():
             state[name] = {"last_processed_date": today, **result}
         state_manager.save(state)
