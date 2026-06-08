@@ -62,23 +62,34 @@ with DAG(
     # ─────────────────────────────────────────────────────────
 
     def run_all_jobs(**context):
+        import logging
         params      = context["params"]
         config_file = params["config_file"]
         extra_args  = ["--dry-run"] if params["dry_run"] else []
 
+        def _stream(cmd):
+            """Run a subprocess and stream its output line-by-line to the Airflow task log."""
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            )
+            for line in proc.stdout:
+                logging.info(line.rstrip())
+            rc = proc.wait()
+            if rc != 0:
+                raise RuntimeError(f"Script failed (exit {rc}): {cmd[2]}")
+
         # 1. V3 Mapping Update — populates patient_mapping_table + child tables
-        print(f"[mapping] Running with config: {config_file}")
-        subprocess.run(
-            [PYTHON_EXECUTABLE, MAPPING_SCRIPT, "--config", config_file] + extra_args,
-            check=True,
-        )
+        logging.info(f"[mapping] Running with config: {config_file}")
+        _stream([PYTHON_EXECUTABLE, "-u", MAPPING_SCRIPT, "--config", config_file] + extra_args)
 
         # 2. V3 Master Recreate — builds pii_data_table / master tables
-        print(f"[master] Running with config: {config_file}")
-        subprocess.run(
-            [PYTHON_EXECUTABLE, MASTER_SCRIPT, "--config", config_file] + extra_args,
-            check=True,
-        )
+        logging.info(f"[master] Running with config: {config_file}")
+        _stream([PYTHON_EXECUTABLE, "-u", MASTER_SCRIPT, "--config", config_file] + extra_args)
 
     run_task = PythonOperator(
         task_id="run_all_jobs",
