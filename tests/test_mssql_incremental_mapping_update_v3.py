@@ -745,7 +745,7 @@ def test_ensure_patient_mapping_table_ddl_single_col():
     assert "patient_mapping_table" in ddl
     assert "`patientid`" in ddl
     assert "nd_patient_id" in ddl
-    assert "offset" in ddl
+    assert "`offset`" in ddl
     assert "registration_date" in ddl
     assert "idx_patientid" in ddl
     conn.commit.assert_called_once()

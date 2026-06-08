@@ -285,7 +285,7 @@ def ensure_patient_mapping_table(mysql_conn, mysql_cursor, identifier_columns):
         f"CREATE TABLE IF NOT EXISTS patient_mapping_table ("
         f"  nd_patient_id     BIGINT NOT NULL,"
         f"  {id_col_defs}"
-        f"  offset            INT NOT NULL,"
+        f"  `offset`          INT NOT NULL,"
         f"  registration_date DATETIME,"
         f"  created_at        DATETIME NOT NULL,"
         f"  updated_at        DATETIME NOT NULL,"

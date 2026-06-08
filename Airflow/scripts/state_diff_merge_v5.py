@@ -9,7 +9,7 @@ from datetime import date
 
 # ── Path setup ──────────────────────────────────────────────────
 # scripts_dir  → lets us import db_config, merge_engine, mssql_mysql_sync
-# project_root → lets mssql_mysql_sync do "from scripts.connection_config import …"
+# project_root → ensures relative imports within scripts/ resolve correctly
 _scripts_dir  = os.path.dirname(os.path.abspath(__file__))
 _project_root = os.path.dirname(_scripts_dir)
 for _p in (_scripts_dir, _project_root):
@@ -29,6 +29,7 @@ from db_config import (
 _INCREMENTAL_SCHEMA = DIFF_STAGING_DB.rsplit("/", 1)[-1]   # centricityps_diff_staging
 _ORIGINAL_SCHEMA    = BASE_DB.rsplit("/", 1)[-1]            # centricityps_original_16oct
 _TRACKING_SCHEMA    = "master"                              # sync timestamp tracking table
+_TRACKING_TABLE     = "table_sync_status"                   # tracking table name
 
 # ============================================================
 # ===================== LOGGING SETUP ========================
@@ -158,7 +159,7 @@ def run_sync_step(table):
 
     try:
         ensure_incremental_db(eng_mysql, incremental_schema=_INCREMENTAL_SCHEMA)
-        ensure_tracking_table(eng_mysql, tracking_schema=_TRACKING_SCHEMA)
+        ensure_tracking_table(eng_mysql, tracking_schema=_TRACKING_SCHEMA, tracking_table=_TRACKING_TABLE)
 
         rows = process_table(
             eng_mssql,
@@ -166,6 +167,8 @@ def run_sync_step(table):
             table,
             incremental_schema=_INCREMENTAL_SCHEMA,
             tracking_schema=_TRACKING_SCHEMA,
+            tracking_table=_TRACKING_TABLE,
+            original_schema=_ORIGINAL_SCHEMA,
             log_fn=logging.info,
         )
 
