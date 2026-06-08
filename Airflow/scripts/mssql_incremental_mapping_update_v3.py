@@ -296,15 +296,17 @@ def build_create_table_ddl(table_cfg):
     date_col      = table_cfg["date_col"]
     return (
         f"CREATE TABLE IF NOT EXISTS `{mapping_table}` ("
+        f"  id                BIGINT        NOT NULL AUTO_INCREMENT,"
         f"  nd_patient_id     BIGINT        NOT NULL,"
-        f"  `{source_id_col}` VARCHAR(255)  NOT NULL,"
+        f"  `{source_id_col}` BIGINT        NOT NULL,"
         f"  `{nd_id_col}`     BIGINT        NOT NULL,"
         f"  `{date_col}`      DATETIME,"
         f"  nd_ActiveFlag     CHAR(1)       NOT NULL DEFAULT 'Y',"
         f"  created_at        DATETIME      NOT NULL,"
         f"  updated_at        DATETIME      NOT NULL,"
-        f"  PRIMARY KEY (`{source_id_col}`),"
-        f"  INDEX idx_nd_patient_id (nd_patient_id)"
+        f"  PRIMARY KEY (id),"
+        f"  INDEX idx_nd_patient_id (nd_patient_id),"
+        f"  INDEX idx_source_id (`{source_id_col}`)"
         f")"
     )
 
@@ -516,9 +518,11 @@ def _load_child_table_state(mysql_cursor, table_cfg):
         else:
             nd_pid, source_id, nd_id, active = row[0], row[1], row[2], row[3]
 
-        source_id_map[source_id] = nd_pid
-
         if active == "Y":
+            # Only active records go into source_id_map — this correctly represents
+            # the current owner of each source entity. Inactive (transferred) rows
+            # are excluded so they don't trigger false transfer detection on next run.
+            source_id_map[source_id] = nd_pid
             source_id_to_nd_id[source_id] = nd_id
 
         if nd_id is not None:

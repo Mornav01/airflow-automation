@@ -349,8 +349,13 @@ def test_build_create_table_ddl_contains_expected_fragments():
     assert "`nd_encounter_id`" in ddl
     assert "`encounter_date`" in ddl
     assert "nd_ActiveFlag" in ddl
-    assert "PRIMARY KEY" in ddl
     assert "CREATE TABLE IF NOT EXISTS" in ddl
+    # source_id is BIGINT (not VARCHAR), auto-increment PK, indexed separately
+    assert "BIGINT" in ddl
+    assert "VARCHAR" not in ddl
+    assert "AUTO_INCREMENT" in ddl
+    assert "PRIMARY KEY (id)" in ddl
+    assert "idx_source_id" in ddl
 
 
 def test_build_create_table_ddl_chart():
@@ -359,6 +364,27 @@ def test_build_create_table_ddl_chart():
     assert "chart_mapping_table" in ddl
     assert "`chart_id`" in ddl
     assert "`nd_chart_id`" in ddl
+
+
+def test_load_child_table_state_inactive_not_in_source_id_map():
+    """Inactive (transferred) rows must NOT appear in source_id_map."""
+    cursor = MagicMock()
+    cursor.fetchall.return_value = [
+        # Old record — inactive (transferred away)
+        {"nd_patient_id": ND_PID_1, "encounter_id": "E1",
+         "nd_encounter_id": int(f"{ND_PID_1}0001"), "nd_ActiveFlag": "N"},
+        # Current active record for a different patient
+        {"nd_patient_id": ND_PID_2, "encounter_id": "E1",
+         "nd_encounter_id": int(f"{ND_PID_2}0001"), "nd_ActiveFlag": "Y"},
+    ]
+    source_id_map, source_id_to_nd_id, last_nd = _load_child_table_state(cursor, ENC_TABLE_CFG)
+
+    # source_id_map should only have the ACTIVE record (nd_pid_2), not the inactive one
+    assert source_id_map.get("E1") == ND_PID_2
+    assert source_id_to_nd_id.get("E1") == int(f"{ND_PID_2}0001")
+    # last_nd_per_patient tracks ALL records (both patients)
+    assert ND_PID_1 in last_nd
+    assert ND_PID_2 in last_nd
 
 
 # ══════════════════════════════════════════════════════════════════════════════
