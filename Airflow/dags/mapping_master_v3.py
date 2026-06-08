@@ -62,7 +62,6 @@ with DAG(
     # ─────────────────────────────────────────────────────────
 
     def run_all_jobs(**context):
-        import logging
         params      = context["params"]
         config_file = params["config_file"]
         extra_args  = ["--dry-run"] if params["dry_run"] else []
@@ -78,17 +77,17 @@ with DAG(
                 env={**os.environ, "PYTHONUNBUFFERED": "1"},
             )
             for line in proc.stdout:
-                logging.info(line.rstrip())
+                print(line, end="", flush=True)
             rc = proc.wait()
             if rc != 0:
                 raise RuntimeError(f"Script failed (exit {rc}): {cmd[2]}")
 
         # 1. V3 Mapping Update — populates patient_mapping_table + child tables
-        logging.info(f"[mapping] Running with config: {config_file}")
+        print(f"[mapping] Running with config: {config_file}", flush=True)
         _stream([PYTHON_EXECUTABLE, "-u", MAPPING_SCRIPT, "--config", config_file] + extra_args)
 
         # 2. V3 Master Recreate — builds pii_data_table / master tables
-        logging.info(f"[master] Running with config: {config_file}")
+        print(f"[master] Running with config: {config_file}", flush=True)
         _stream([PYTHON_EXECUTABLE, "-u", MASTER_SCRIPT, "--config", config_file] + extra_args)
 
     run_task = PythonOperator(
