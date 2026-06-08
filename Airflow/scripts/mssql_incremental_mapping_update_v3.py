@@ -340,7 +340,7 @@ def ensure_child_table(mysql_conn, mysql_cursor, table_cfg):
 
 def ensure_patient_mapping_table(mysql_conn, mysql_cursor, identifier_columns):
     """Create patient_mapping_table if it doesn't exist, driven by identifier_columns."""
-    id_col_defs = " ".join(f"`{c}` VARCHAR(255)," for c in identifier_columns)
+    id_col_defs = " ".join(f"`{c}` BIGINT," for c in identifier_columns)
     id_indexes  = " ".join(f"INDEX idx_{c} (`{c}`)," for c in identifier_columns)
     mysql_cursor.execute(
         f"CREATE TABLE IF NOT EXISTS patient_mapping_table ("

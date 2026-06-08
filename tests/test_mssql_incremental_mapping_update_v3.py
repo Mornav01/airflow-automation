@@ -772,7 +772,7 @@ def test_ensure_patient_mapping_table_ddl_single_col():
     ensure_patient_mapping_table(conn, cursor, ["patientid"])
     ddl = cursor.execute.call_args[0][0]
     assert "patient_mapping_table" in ddl
-    assert "`patientid`" in ddl
+    assert "`patientid` BIGINT" in ddl   # identifier cols are BIGINT (not VARCHAR)
     assert "nd_patient_id" in ddl
     assert "`offset`" in ddl
     assert "registration_date" in ddl
