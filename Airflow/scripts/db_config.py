@@ -124,13 +124,15 @@ AWS_TRANSFER_AWS_SECRET_ACCESS_KEY = os.environ["AWS_TRANSFER_AWS_SECRET_ACCESS_
 AWS_TRANSFER_OUTPUT_BASE           = os.environ["AWS_TRANSFER_OUTPUT_BASE"]
 
 # ── V3 Mapping connections & config ──────────────────────────────
-V3_MAPPING_MSSQL_CONN = {
-    "server":   os.environ["V3_MAPPING_MSSQL_SERVER"],
-    "port":     int(os.environ["V3_MAPPING_MSSQL_PORT"]),
-    "database": os.environ["V3_MAPPING_MSSQL_DATABASE"],
-    "user":     os.environ["V3_MAPPING_MSSQL_USER"],
-    "password": os.environ["V3_MAPPING_MSSQL_PASSWORD"],
+# Source DB — works for both MSSQL and MySQL sources (source_type in YAML picks the driver)
+V3_MAPPING_SOURCE_CONN = {
+    "host":     os.environ["V3_MAPPING_SOURCE_HOST"],
+    "port":     int(os.environ.get("V3_MAPPING_SOURCE_PORT", "1433")),
+    "database": os.environ["V3_MAPPING_SOURCE_DATABASE"],
+    "user":     os.environ["V3_MAPPING_SOURCE_USER"],
+    "password": os.environ["V3_MAPPING_SOURCE_PASSWORD"],
 }
+# Destination DB — always MySQL
 V3_MAPPING_MYSQL_CONN = {
     "host":     os.environ["V3_MAPPING_MYSQL_HOST"],
     "database": os.environ["V3_MAPPING_MYSQL_DATABASE"],

@@ -30,6 +30,7 @@ from mssql_incremental_mapping_update_v3 import (
     validate_identifier_uniqueness,
     validate_patient_sql_columns,
     validate_child_sql_columns,
+    execute_source_query,
     resolve_nd_patient_id,
     generate_nd_id,
     build_create_table_ddl,
@@ -363,10 +364,10 @@ def test_build_create_table_ddl_chart():
 # ══════════════════════════════════════════════════════════════════════════════
 
 # ══════════════════════════════════════════════════════════════════════════════
-# run_patient_phase — integration with mocked execute_mssql_query
+# run_patient_phase — integration with mocked execute_source_query
 # ══════════════════════════════════════════════════════════════════════════════
 
-@patch("mssql_incremental_mapping_update_v3.execute_mssql_query")
+@patch("mssql_incremental_mapping_update_v3.execute_source_query")
 def test_patient_phase_inserts_new_patients(mock_execute):
     src_rows = [
         {"patientid": 1, "profileid": 10, "pid": 100, "registration_date": None},
@@ -380,7 +381,7 @@ def test_patient_phase_inserts_new_patients(mock_execute):
     mysql_conn = MagicMock()
 
     maps, count = run_patient_phase(
-        {"server": "x"}, mysql_conn, mysql_cursor, MINIMAL_CONFIG["patient"], NOW, dry_run=False
+        "mssql", {"host": "x"}, mysql_conn, mysql_cursor, MINIMAL_CONFIG["patient"], NOW, dry_run=False
     )
 
     assert count == 2
@@ -390,7 +391,7 @@ def test_patient_phase_inserts_new_patients(mock_execute):
     assert 2 in maps["patientid"]
 
 
-@patch("mssql_incremental_mapping_update_v3.execute_mssql_query")
+@patch("mssql_incremental_mapping_update_v3.execute_source_query")
 def test_patient_phase_skips_existing_patients(mock_execute):
     mock_execute.return_value = [
         {"patientid": 1, "profileid": 10, "pid": 100, "registration_date": None},
@@ -403,14 +404,14 @@ def test_patient_phase_skips_existing_patients(mock_execute):
     mysql_conn = MagicMock()
 
     maps, count = run_patient_phase(
-        {"server": "x"}, mysql_conn, mysql_cursor, MINIMAL_CONFIG["patient"], NOW, dry_run=False
+        "mssql", {"host": "x"}, mysql_conn, mysql_cursor, MINIMAL_CONFIG["patient"], NOW, dry_run=False
     )
 
     assert count == 0
     mysql_cursor.executemany.assert_not_called()
 
 
-@patch("mssql_incremental_mapping_update_v3.execute_mssql_query")
+@patch("mssql_incremental_mapping_update_v3.execute_source_query")
 def test_patient_phase_dry_run_does_not_write(mock_execute):
     mock_execute.return_value = [
         {"patientid": 1, "profileid": 10, "pid": 100, "registration_date": None},
@@ -421,7 +422,7 @@ def test_patient_phase_dry_run_does_not_write(mock_execute):
     mysql_conn = MagicMock()
 
     maps, count = run_patient_phase(
-        {"server": "x"}, mysql_conn, mysql_cursor, MINIMAL_CONFIG["patient"], NOW, dry_run=True
+        "mssql", {"host": "x"}, mysql_conn, mysql_cursor, MINIMAL_CONFIG["patient"], NOW, dry_run=True
     )
 
     assert count == 1
@@ -429,7 +430,7 @@ def test_patient_phase_dry_run_does_not_write(mock_execute):
     mysql_cursor.executemany.assert_not_called()
 
 
-@patch("mssql_incremental_mapping_update_v3.execute_mssql_query")
+@patch("mssql_incremental_mapping_update_v3.execute_source_query")
 def test_patient_phase_invalid_identifiers_aborts(mock_execute):
     mock_execute.return_value = [
         {"patientid": 1, "profileid": 10, "pid": 100, "registration_date": None},
@@ -442,12 +443,12 @@ def test_patient_phase_invalid_identifiers_aborts(mock_execute):
 
     with pytest.raises(ValueError, match="NOT 1:1"):
         run_patient_phase(
-            {"server": "x"}, mysql_conn, mysql_cursor, MINIMAL_CONFIG["patient"], NOW
+            "mssql", {"host": "x"}, mysql_conn, mysql_cursor, MINIMAL_CONFIG["patient"], NOW
         )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# run_child_table_phase — integration with mocked execute_mssql_query
+# run_child_table_phase — integration with mocked execute_source_query
 # ══════════════════════════════════════════════════════════════════════════════
 
 ND_PID_1 = 100000000000001
@@ -471,7 +472,7 @@ def _child_mysql_mock(existing_child_rows):
     return conn, cursor
 
 
-@patch("mssql_incremental_mapping_update_v3.execute_mssql_query")
+@patch("mssql_incremental_mapping_update_v3.execute_source_query")
 def test_child_phase_inserts_new_rows(mock_execute):
     mock_execute.return_value = [
         {"encounter_id": "E1", "patientid": 1, "encounter_date": None},
@@ -480,7 +481,7 @@ def test_child_phase_inserts_new_rows(mock_execute):
     mysql_conn, mysql_cursor = _child_mysql_mock([])
 
     stats = run_child_table_phase(
-        {"server": "x"}, mysql_conn, mysql_cursor,
+        "mssql", {"host": "x"}, mysql_conn, mysql_cursor,
         ENC_TABLE_CFG, PATIENT_MAPS, NOW, dry_run=False,
     )
 
@@ -489,7 +490,7 @@ def test_child_phase_inserts_new_rows(mock_execute):
     assert mysql_cursor.executemany.called
 
 
-@patch("mssql_incremental_mapping_update_v3.execute_mssql_query")
+@patch("mssql_incremental_mapping_update_v3.execute_source_query")
 def test_child_phase_skips_existing_active(mock_execute):
     mock_execute.return_value = [
         {"encounter_id": "E1", "patientid": 1, "encounter_date": None}
@@ -501,7 +502,7 @@ def test_child_phase_skips_existing_active(mock_execute):
     mysql_conn, mysql_cursor = _child_mysql_mock(existing)
 
     stats = run_child_table_phase(
-        {"server": "x"}, mysql_conn, mysql_cursor,
+        "mssql", {"host": "x"}, mysql_conn, mysql_cursor,
         ENC_TABLE_CFG, PATIENT_MAPS, NOW, dry_run=False,
     )
 
@@ -509,7 +510,7 @@ def test_child_phase_skips_existing_active(mock_execute):
     mysql_cursor.executemany.assert_not_called()
 
 
-@patch("mssql_incremental_mapping_update_v3.execute_mssql_query")
+@patch("mssql_incremental_mapping_update_v3.execute_source_query")
 def test_child_phase_transfer_deactivates_and_reinserts(mock_execute):
     # E1 currently belongs to patient 1; source now says it belongs to patient 2.
     mock_execute.return_value = [
@@ -522,7 +523,7 @@ def test_child_phase_transfer_deactivates_and_reinserts(mock_execute):
     mysql_conn, mysql_cursor = _child_mysql_mock(existing)
 
     stats = run_child_table_phase(
-        {"server": "x"}, mysql_conn, mysql_cursor,
+        "mssql", {"host": "x"}, mysql_conn, mysql_cursor,
         ENC_TABLE_CFG, PATIENT_MAPS, NOW, dry_run=False,
     )
 
@@ -530,7 +531,7 @@ def test_child_phase_transfer_deactivates_and_reinserts(mock_execute):
     assert stats["new_rows"] == 1
 
 
-@patch("mssql_incremental_mapping_update_v3.execute_mssql_query")
+@patch("mssql_incremental_mapping_update_v3.execute_source_query")
 def test_child_phase_transfer_not_double_inserted_in_same_run(mock_execute):
     # E1 appears twice in source — both pointing to patient 2 after transfer.
     mock_execute.return_value = [
@@ -544,7 +545,7 @@ def test_child_phase_transfer_not_double_inserted_in_same_run(mock_execute):
     mysql_conn, mysql_cursor = _child_mysql_mock(existing)
 
     stats = run_child_table_phase(
-        {"server": "x"}, mysql_conn, mysql_cursor,
+        "mssql", {"host": "x"}, mysql_conn, mysql_cursor,
         ENC_TABLE_CFG, PATIENT_MAPS, NOW, dry_run=False,
     )
 
@@ -552,7 +553,7 @@ def test_child_phase_transfer_not_double_inserted_in_same_run(mock_execute):
     assert stats["new_rows"] == 1   # not 2 — second occurrence skipped
 
 
-@patch("mssql_incremental_mapping_update_v3.execute_mssql_query")
+@patch("mssql_incremental_mapping_update_v3.execute_source_query")
 def test_child_phase_unmapped_patient_skipped(mock_execute):
     mock_execute.return_value = [
         {"encounter_id": "E_ORPHAN", "patientid": 999, "encounter_date": None},
@@ -560,7 +561,7 @@ def test_child_phase_unmapped_patient_skipped(mock_execute):
     mysql_conn, mysql_cursor = _child_mysql_mock([])
 
     stats = run_child_table_phase(
-        {"server": "x"}, mysql_conn, mysql_cursor,
+        "mssql", {"host": "x"}, mysql_conn, mysql_cursor,
         ENC_TABLE_CFG, PATIENT_MAPS, NOW, dry_run=False,
     )
 
@@ -568,7 +569,7 @@ def test_child_phase_unmapped_patient_skipped(mock_execute):
     mysql_cursor.executemany.assert_not_called()
 
 
-@patch("mssql_incremental_mapping_update_v3.execute_mssql_query")
+@patch("mssql_incremental_mapping_update_v3.execute_source_query")
 def test_child_phase_dry_run_no_writes(mock_execute):
     mock_execute.return_value = [
         {"encounter_id": "E1", "patientid": 1, "encounter_date": None}
@@ -576,7 +577,7 @@ def test_child_phase_dry_run_no_writes(mock_execute):
     mysql_conn, mysql_cursor = _child_mysql_mock([])
 
     stats = run_child_table_phase(
-        {"server": "x"}, mysql_conn, mysql_cursor,
+        "mssql", {"host": "x"}, mysql_conn, mysql_cursor,
         ENC_TABLE_CFG, PATIENT_MAPS, NOW, dry_run=True,
     )
 
@@ -586,7 +587,7 @@ def test_child_phase_dry_run_no_writes(mock_execute):
     mysql_cursor.executemany.assert_not_called()
 
 
-@patch("mssql_incremental_mapping_update_v3.execute_mssql_query")
+@patch("mssql_incremental_mapping_update_v3.execute_source_query")
 def test_child_phase_fallback_ref_col_used(mock_execute):
     # Row has patientid=None but profileid=10 → should resolve via fallback
     mock_execute.return_value = [
@@ -596,7 +597,7 @@ def test_child_phase_fallback_ref_col_used(mock_execute):
     cfg = dict(ENC_TABLE_CFG, patient_ref_cols=["patientid", "profileid"])
 
     stats = run_child_table_phase(
-        {"server": "x"}, mysql_conn, mysql_cursor,
+        "mssql", {"host": "x"}, mysql_conn, mysql_cursor,
         cfg, PATIENT_MAPS, NOW, dry_run=False,
     )
 
@@ -607,7 +608,7 @@ def test_child_phase_fallback_ref_col_used(mock_execute):
 # nd_id continuity — second run inserts nothing for same source data
 # ══════════════════════════════════════════════════════════════════════════════
 
-@patch("mssql_incremental_mapping_update_v3.execute_mssql_query")
+@patch("mssql_incremental_mapping_update_v3.execute_source_query")
 def test_incremental_run_no_duplicates(mock_execute):
     """Second run with identical source data must be a no-op."""
     mock_execute.return_value = [
@@ -623,7 +624,7 @@ def test_incremental_run_no_duplicates(mock_execute):
     mysql_conn, mysql_cursor = _child_mysql_mock(existing)
 
     stats = run_child_table_phase(
-        {"server": "x"}, mysql_conn, mysql_cursor,
+        "mssql", {"host": "x"}, mysql_conn, mysql_cursor,
         ENC_TABLE_CFG, PATIENT_MAPS, NOW, dry_run=False,
     )
 
@@ -636,7 +637,7 @@ def test_incremental_run_no_duplicates(mock_execute):
 # nd_id sequence correctness
 # ══════════════════════════════════════════════════════════════════════════════
 
-@patch("mssql_incremental_mapping_update_v3.execute_mssql_query")
+@patch("mssql_incremental_mapping_update_v3.execute_source_query")
 def test_nd_id_sequence_for_multiple_encounters_per_patient(mock_execute):
     mock_execute.return_value = [
         {"encounter_id": "E1", "patientid": 1, "encounter_date": None},
@@ -649,7 +650,7 @@ def test_nd_id_sequence_for_multiple_encounters_per_patient(mock_execute):
     mysql_cursor.executemany.side_effect = lambda _, rows: inserted_rows.extend(rows)
 
     run_child_table_phase(
-        {"server": "x"}, mysql_conn, mysql_cursor,
+        "mssql", {"host": "x"}, mysql_conn, mysql_cursor,
         ENC_TABLE_CFG, PATIENT_MAPS, NOW, dry_run=False,
     )
 
@@ -762,3 +763,69 @@ def test_ensure_patient_mapping_table_ddl_multi_col():
     assert "idx_patientid" in ddl
     assert "idx_profileid" in ddl
     assert "idx_pid" in ddl
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# source_type validation in load_config
+# ══════════════════════════════════════════════════════════════════════════════
+
+def test_load_config_invalid_source_type(tmp_path):
+    bad = dict(MINIMAL_CONFIG, source_type="postgres")
+    cfg_file = tmp_path / "cfg.yaml"
+    cfg_file.write_text(yaml.dump(bad))
+    with pytest.raises(ValueError, match="source_type"):
+        load_config(str(cfg_file))
+
+
+def test_load_config_default_source_type_is_mssql(tmp_path):
+    cfg_file = tmp_path / "cfg.yaml"
+    cfg_file.write_text(yaml.dump(MINIMAL_CONFIG))   # no source_type key
+    result = load_config(str(cfg_file))
+    assert result["source_type"] == "mssql"
+
+
+def test_load_config_mysql_source_type_accepted(tmp_path):
+    good = dict(MINIMAL_CONFIG, source_type="mysql")
+    cfg_file = tmp_path / "cfg.yaml"
+    cfg_file.write_text(yaml.dump(good))
+    result = load_config(str(cfg_file))
+    assert result["source_type"] == "mysql"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# execute_source_query — driver selection
+# ══════════════════════════════════════════════════════════════════════════════
+
+def test_execute_source_query_uses_pymssql_for_mssql(tmp_path):
+    sql_file = tmp_path / "q.sql"
+    sql_file.write_text("SELECT 1")
+    mock_pymssql = sys.modules["pymssql"]
+    mock_cursor = MagicMock()
+    mock_cursor.fetchall.return_value = [{"patientid": 1}]
+    mock_conn = MagicMock()
+    mock_conn.cursor.return_value = mock_cursor
+    mock_pymssql.connect.return_value = mock_conn
+
+    result = execute_source_query("mssql", {"host": "h", "port": 1433, "database": "d", "user": "u", "password": "p"}, str(sql_file))
+
+    mock_pymssql.connect.assert_called_once_with(server="h", port=1433, database="d", user="u", password="p")
+    assert result == [{"patientid": 1}]
+
+
+def test_execute_source_query_uses_mysql_for_mysql(tmp_path):
+    sql_file = tmp_path / "q.sql"
+    sql_file.write_text("SELECT 1")
+    # The script uses `mysql.connector.connect` via the `mysql` module object,
+    # so we patch through sys.modules["mysql"].connector (not the separate
+    # sys.modules["mysql.connector"] stub which is a different MagicMock).
+    mock_cursor = MagicMock()
+    mock_cursor.fetchall.return_value = [{"patientid": 2}]
+    mock_conn = MagicMock()
+    mock_conn.cursor.return_value = mock_cursor
+    sys.modules["mysql"].connector.connect.return_value = mock_conn
+
+    conn_params = {"host": "h", "port": 3306, "database": "d", "user": "u", "password": "p"}
+    result = execute_source_query("mysql", conn_params, str(sql_file))
+
+    sys.modules["mysql"].connector.connect.assert_called_once_with(**conn_params)
+    assert result == [{"patientid": 2}]

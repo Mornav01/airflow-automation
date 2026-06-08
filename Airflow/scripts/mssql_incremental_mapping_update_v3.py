@@ -45,6 +45,11 @@ def load_config(config_path):
     with open(config_path) as f:
         cfg = yaml.safe_load(f)
 
+    source_type = cfg.get("source_type", "mssql").lower()
+    if source_type not in ("mssql", "mysql"):
+        raise ValueError(f"source_type must be 'mssql' or 'mysql', got: '{source_type}'")
+    cfg["source_type"] = source_type
+
     for key in ("patient", "child_tables"):
         if key not in cfg:
             raise ValueError(f"Config missing required top-level key: '{key}'")
@@ -297,16 +302,30 @@ def ensure_patient_mapping_table(mysql_conn, mysql_cursor, identifier_columns):
     logging.info("Ensured patient_mapping_table exists.")
 
 
-# ─── MSSQL query ──────────────────────────────────────────────────────────────
+# ─── Source DB query (MSSQL or MySQL) ────────────────────────────────────────
 
-def execute_mssql_query(mssql_conn_params, sql_file_path):
+def execute_source_query(source_type, conn_params, sql_file_path):
+    """Execute a SELECT query against the source DB (mssql or mysql)."""
     query = Path(sql_file_path).read_text()
-    conn = pymssql.connect(**mssql_conn_params)
-    cursor = conn.cursor(as_dict=True)
-    cursor.execute(query)
-    rows = cursor.fetchall()
-    conn.close()
-    return rows
+    if source_type == "mssql":
+        conn = pymssql.connect(
+            server=conn_params["host"],
+            port=conn_params["port"],
+            database=conn_params["database"],
+            user=conn_params["user"],
+            password=conn_params["password"],
+        )
+        cursor = conn.cursor(as_dict=True)
+    else:
+        conn   = mysql.connector.connect(**conn_params)
+        cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(query)
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        cursor.close()
+        conn.close()
 
 
 # ─── Patient phase ────────────────────────────────────────────────────────────
@@ -333,7 +352,7 @@ def _load_patient_maps_from_db(mysql_cursor, identifier_columns):
     return patient_maps_by_col
 
 
-def run_patient_phase(mssql_conn_params, mysql_conn, mysql_cursor, patient_cfg, now, dry_run=False):
+def run_patient_phase(source_type, source_conn_params, mysql_conn, mysql_cursor, patient_cfg, now, dry_run=False):
     """
     Execute patient SQL → validate identifiers → insert new patients.
     Returns (patient_maps_by_col, new_patient_count).
@@ -346,7 +365,7 @@ def run_patient_phase(mssql_conn_params, mysql_conn, mysql_cursor, patient_cfg, 
 
     ensure_patient_mapping_table(mysql_conn, mysql_cursor, identifier_columns)
 
-    src_data = execute_mssql_query(mssql_conn_params, patient_cfg["sql_file"])
+    src_data = execute_source_query(source_type, source_conn_params, patient_cfg["sql_file"])
     logging.info(f"[patient] Fetched {len(src_data)} rows from patient SQL.")
 
     validate_patient_sql_columns(src_data, identifier_columns)
@@ -454,7 +473,7 @@ def _load_child_table_state(mysql_cursor, table_cfg):
 
 
 def run_child_table_phase(
-    mssql_conn_params, mysql_conn, mysql_cursor,
+    source_type, source_conn_params, mysql_conn, mysql_cursor,
     table_cfg, patient_maps_by_col, now, dry_run=False,
 ):
     """
@@ -469,7 +488,7 @@ def run_child_table_phase(
     suffix_len       = table_cfg["nd_id_suffix_len"]
     use_len_guard    = table_cfg.get("use_len_guard", False)
 
-    src_data = execute_mssql_query(mssql_conn_params, table_cfg["sql_file"])
+    src_data = execute_source_query(source_type, source_conn_params, table_cfg["sql_file"])
     logging.info(f"[{mapping_table}] Fetched {len(src_data)} rows from source SQL.")
 
     validate_child_sql_columns(src_data, table_cfg)
@@ -575,22 +594,23 @@ def run_child_table_phase(
 
 # ─── Top-level ETL ────────────────────────────────────────────────────────────
 
-def run_etl(config, mssql_conn_params, mysql_conn_params, dry_run=False):
-    now = datetime.now(IST).replace(tzinfo=None)
+def run_etl(config, source_conn_params, mysql_conn_params, dry_run=False):
+    now         = datetime.now(IST).replace(tzinfo=None)
+    source_type = config["source_type"]
 
     mysql_conn   = mysql.connector.connect(**mysql_conn_params)
     mysql_cursor = mysql_conn.cursor(dictionary=True)
 
     try:
         patient_maps_by_col, new_patients = run_patient_phase(
-            mssql_conn_params, mysql_conn, mysql_cursor,
+            source_type, source_conn_params, mysql_conn, mysql_cursor,
             config["patient"], now, dry_run,
         )
 
         child_stats = {}
         for table_cfg in config.get("child_tables", []):
             stats = run_child_table_phase(
-                mssql_conn_params, mysql_conn, mysql_cursor,
+                source_type, source_conn_params, mysql_conn, mysql_cursor,
                 table_cfg, patient_maps_by_col, now, dry_run,
             )
             child_stats[table_cfg["name"]] = stats
@@ -616,7 +636,7 @@ def main():
 
     config = load_config(args.config)
 
-    from db_config import STATE_DIR, V3_MAPPING_MSSQL_CONN, V3_MAPPING_MYSQL_CONN
+    from db_config import STATE_DIR, V3_MAPPING_SOURCE_CONN, V3_MAPPING_MYSQL_CONN
 
     state_dir = os.path.join(STATE_DIR, "mapping_master_v3")
     setup_logging(state_dir)
@@ -632,7 +652,7 @@ def main():
     logging.info("Starting V3 Mapping Update ETL")
 
     try:
-        result = run_etl(config, V3_MAPPING_MSSQL_CONN, V3_MAPPING_MYSQL_CONN, args.dry_run)
+        result = run_etl(config, V3_MAPPING_SOURCE_CONN, V3_MAPPING_MYSQL_CONN, args.dry_run)
         state  = {"last_processed_date": today, **result}
         state_manager.save(state)
         logging.info(f"V3 Mapping Update completed: {result}")

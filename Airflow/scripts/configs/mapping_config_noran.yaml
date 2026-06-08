@@ -1,6 +1,9 @@
 # V3 mapping config for the Noran project.
 # Point sql_file paths to absolute paths on the Airflow worker.
 
+# source_type: 'mssql' or 'mysql'. Omit to default to 'mssql'.
+source_type: mssql
+
 patient:
   sql_file: /opt/airflow/Airflow/scripts/sql/patient_noran.sql
   # All identifier_columns must be 1:1 with each other (validated at runtime).
