@@ -158,6 +158,60 @@ def validate_child_sql_columns(src_data, table_cfg):
         )
 
 
+# ─── QC: patient source deduplication ────────────────────────────────────────
+
+def dedup_patient_source_data(src_data, identifier_columns):
+    """
+    Keep only the first occurrence of each unique identifier combination.
+    Drops duplicate rows (same values across all identifier_columns) with a warning.
+    This guarantees at most one row per patient enters the insertion loop, regardless
+    of how many times the source table repeats the same patient.
+    """
+    seen    = set()
+    deduped = []
+    dropped = 0
+    for row in src_data:
+        key = tuple(row.get(col) for col in identifier_columns)
+        if key in seen:
+            dropped += 1
+        else:
+            seen.add(key)
+            deduped.append(row)
+    if dropped:
+        logging.warning(
+            f"[patient] Dropped {dropped} duplicate source rows "
+            f"(same {identifier_columns} combination). Keeping first occurrence per patient."
+        )
+    return deduped
+
+
+def dedup_child_source_data(src_data, source_id_col):
+    """
+    Keep only the first occurrence of each unique source_id_col value.
+    Duplicate rows (same source entity ID repeated) are dropped with a warning.
+    NULL source_ids are passed through unchanged — they are skipped downstream.
+    """
+    seen    = set()
+    deduped = []
+    dropped = 0
+    for row in src_data:
+        sid = row.get(source_id_col)
+        if sid is None:
+            deduped.append(row)
+            continue
+        if sid in seen:
+            dropped += 1
+        else:
+            seen.add(sid)
+            deduped.append(row)
+    if dropped:
+        logging.warning(
+            f"[{source_id_col}] Dropped {dropped} duplicate source rows. "
+            "Keeping first occurrence per source ID."
+        )
+    return deduped
+
+
 # ─── QC: identifier uniqueness ────────────────────────────────────────────────
 
 def validate_identifier_uniqueness(src_data, identifier_columns):
@@ -370,6 +424,8 @@ def run_patient_phase(source_type, source_conn_params, mysql_conn, mysql_cursor,
 
     validate_patient_sql_columns(src_data, identifier_columns)
     validate_identifier_uniqueness(src_data, identifier_columns)
+    src_data = dedup_patient_source_data(src_data, identifier_columns)
+    logging.info(f"[patient] {len(src_data)} unique patients after dedup.")
 
     patient_maps_by_col = _load_patient_maps_from_db(mysql_cursor, identifier_columns)
     logging.info(f"[patient] Loaded {len(patient_maps_by_col[first_id_col])} existing patients.")
@@ -492,6 +548,8 @@ def run_child_table_phase(
     logging.info(f"[{mapping_table}] Fetched {len(src_data)} rows from source SQL.")
 
     validate_child_sql_columns(src_data, table_cfg)
+    src_data = dedup_child_source_data(src_data, source_id_col)
+    logging.info(f"[{mapping_table}] {len(src_data)} unique rows after dedup.")
     ensure_child_table(mysql_conn, mysql_cursor, table_cfg)
 
     source_id_map, source_id_to_nd_id, last_nd_per_patient = _load_child_table_state(

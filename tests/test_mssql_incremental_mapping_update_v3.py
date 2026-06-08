@@ -30,6 +30,8 @@ from mssql_incremental_mapping_update_v3 import (
     validate_identifier_uniqueness,
     validate_patient_sql_columns,
     validate_child_sql_columns,
+    dedup_patient_source_data,
+    dedup_child_source_data,
     execute_source_query,
     resolve_nd_patient_id,
     generate_nd_id,
@@ -829,3 +831,122 @@ def test_execute_source_query_uses_mysql_for_mysql(tmp_path):
 
     sys.modules["mysql"].connector.connect.assert_called_once_with(**conn_params)
     assert result == [{"patientid": 2}]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# dedup_patient_source_data
+# ══════════════════════════════════════════════════════════════════════════════
+
+def test_dedup_patient_source_data_no_duplicates():
+    src = [
+        {"patientid": 1, "profileid": 10, "registration_date": None},
+        {"patientid": 2, "profileid": 20, "registration_date": None},
+    ]
+    result = dedup_patient_source_data(src, ["patientid", "profileid"])
+    assert len(result) == 2
+    assert result == src
+
+
+def test_dedup_patient_source_data_exact_duplicates():
+    row = {"patientid": 1, "profileid": 10, "registration_date": None}
+    src = [row, dict(row), dict(row)]   # same row 3 times
+    result = dedup_patient_source_data(src, ["patientid", "profileid"])
+    assert len(result) == 1
+    assert result[0]["patientid"] == 1
+
+
+def test_dedup_patient_source_data_partial_duplicates():
+    src = [
+        {"patientid": 1, "profileid": 10},
+        {"patientid": 2, "profileid": 20},
+        {"patientid": 1, "profileid": 10},   # dup of row 1
+        {"patientid": 3, "profileid": 30},
+        {"patientid": 2, "profileid": 20},   # dup of row 2
+    ]
+    result = dedup_patient_source_data(src, ["patientid", "profileid"])
+    assert len(result) == 3
+    assert [r["patientid"] for r in result] == [1, 2, 3]
+
+
+def test_dedup_keeps_first_occurrence():
+    src = [
+        {"patientid": 1, "registration_date": "2024-01-01"},
+        {"patientid": 1, "registration_date": "2024-06-01"},   # dup — second occurrence
+    ]
+    result = dedup_patient_source_data(src, ["patientid"])
+    assert len(result) == 1
+    assert result[0]["registration_date"] == "2024-01-01"   # first occurrence kept
+
+
+@patch("mssql_incremental_mapping_update_v3.execute_source_query")
+def test_patient_phase_deduplicates_source_before_insert(mock_execute):
+    # 3 rows: patient 1 appears twice (dup), patient 2 once → only 2 should be inserted
+    mock_execute.return_value = [
+        {"patientid": 1, "profileid": 10, "pid": 100, "registration_date": None},
+        {"patientid": 1, "profileid": 10, "pid": 100, "registration_date": None},  # dup
+        {"patientid": 2, "profileid": 20, "pid": 200, "registration_date": None},
+    ]
+    mysql_cursor = MagicMock()
+    mysql_cursor.fetchall.return_value = []
+    mysql_cursor.fetchone.return_value = {"max_id": 99999999999999}
+    mysql_conn = MagicMock()
+
+    maps, count = run_patient_phase(
+        "mssql", {"host": "x"}, mysql_conn, mysql_cursor, MINIMAL_CONFIG["patient"], NOW, dry_run=False
+    )
+
+    assert count == 2   # only 2 unique patients inserted, not 3
+    assert 1 in maps["patientid"]
+    assert 2 in maps["patientid"]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# dedup_child_source_data
+# ══════════════════════════════════════════════════════════════════════════════
+
+def test_dedup_child_source_data_no_duplicates():
+    src = [
+        {"encounter_id": "E1", "patientid": 1, "encounter_date": None},
+        {"encounter_id": "E2", "patientid": 1, "encounter_date": None},
+    ]
+    result = dedup_child_source_data(src, "encounter_id")
+    assert len(result) == 2
+    assert result == src
+
+
+def test_dedup_child_source_data_exact_duplicates():
+    src = [
+        {"encounter_id": "E1", "patientid": 1},
+        {"encounter_id": "E1", "patientid": 1},   # dup
+        {"encounter_id": "E1", "patientid": 1},   # dup
+    ]
+    result = dedup_child_source_data(src, "encounter_id")
+    assert len(result) == 1
+    assert result[0]["encounter_id"] == "E1"
+
+
+def test_dedup_child_source_data_null_source_id_passed_through():
+    src = [
+        {"encounter_id": None, "patientid": 1},   # NULL id — passed through, skipped downstream
+        {"encounter_id": "E1", "patientid": 1},
+    ]
+    result = dedup_child_source_data(src, "encounter_id")
+    assert len(result) == 2   # NULL row is kept (not deduped out)
+
+
+@patch("mssql_incremental_mapping_update_v3.execute_source_query")
+def test_child_phase_deduplicates_source_before_insert(mock_execute):
+    # 3 rows: E1 appears twice (dup), E2 once → only 2 should be inserted
+    mock_execute.return_value = [
+        {"encounter_id": "E1", "patientid": 1, "encounter_date": None},
+        {"encounter_id": "E1", "patientid": 1, "encounter_date": None},  # dup
+        {"encounter_id": "E2", "patientid": 2, "encounter_date": None},
+    ]
+    mysql_conn, mysql_cursor = _child_mysql_mock([])
+
+    stats = run_child_table_phase(
+        "mssql", {"host": "x"}, mysql_conn, mysql_cursor,
+        ENC_TABLE_CFG, PATIENT_MAPS, NOW, dry_run=False,
+    )
+
+    assert stats["new_rows"] == 2   # only 2 unique encounters inserted, not 3
