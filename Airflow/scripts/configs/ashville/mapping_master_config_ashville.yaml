@@ -1,0 +1,35 @@
+# V3 mapping + master config for the Ashville project.
+# Point sql_file paths to absolute paths on the Airflow worker.
+
+# source_type: 'mssql' or 'mysql'. Omit to default to 'mssql'.
+source_type: mysql
+
+patient:
+  sql_file: /Users/ndaiasheville/Documents/airflow/airflow-automation/Airflow/scripts/sql/ashville/patient_mapping.sql
+  # All identifier_columns must be 1:1 with each other (validated at runtime).
+  identifier_columns:
+    - patientid
+  # nd_patient_id starts at this value when the mapping table is empty.
+  base_nd_id: 100100150000001
+
+child_tables:
+
+  - name: encounter
+    sql_file: /Users/ndaiasheville/Documents/airflow/airflow-automation/Airflow/scripts/sql/ashville/encounter_mapping.sql
+    # patient_ref_cols: columns returned by the child SQL that link to a patient.
+    # Tried in order — first non-null match wins.
+    patient_ref_cols:
+      - patientid
+    source_id_col: encounter_id      # source system's encounter identifier column alias
+    date_col: encounter_date          # date column alias in the child SQL
+    nd_id_suffix_len: 4               # nd_encounter_id = {nd_patient_id}0001, 0002, ...
+    mapping_table: encounter_mapping_table
+    nd_id_col: nd_encounter_id
+
+master_tables:
+
+  - name: pii_data
+    sql_file: /Users/ndaiasheville/Documents/airflow/airflow-automation/Airflow/scripts/sql/ashville/master_pii_data_ashville.sql
+    join_cols:
+      - patientid
+    target_table: pii_data_table

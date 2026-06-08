@@ -82,6 +82,20 @@ def load_config(config_path):
                 f"must all be in patient.identifier_columns {sorted(identifier_set)}"
             )
 
+    # Validate master_tables section (optional — not all configs define master tables)
+    for tbl in cfg.get("master_tables", []):
+        for key in ("name", "sql_file", "join_cols", "target_table"):
+            if key not in tbl:
+                raise ValueError(f"master_table '{tbl.get('name', '?')}' missing required key: '{key}'")
+        if not isinstance(tbl["join_cols"], list) or not tbl["join_cols"]:
+            raise ValueError(f"master_table '{tbl['name']}': 'join_cols' must be a non-empty list")
+        invalid = [c for c in tbl["join_cols"] if c not in identifier_set]
+        if invalid:
+            raise ValueError(
+                f"master_table '{tbl['name']}': join_cols {invalid} "
+                f"must all be in patient.identifier_columns {sorted(identifier_set)}"
+            )
+
     return cfg
 
 

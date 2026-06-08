@@ -1,0 +1,305 @@
+"""
+V3 Master Recreate — config-driven master table builder.
+
+Reads source data, joins to patient_mapping_table via N identifier columns
+(ordered fallback: first matching column per row wins), and writes to destination
+MySQL master tables with rotation (old → _old).
+
+Uses the same YAML config file as incremental_mapping_update_v3.py.
+Run AFTER the mapping script so patient_mapping_table is populated.
+
+Usage:
+    python master_recreate_v3.py --config /path/to/mapping_master_config.yaml
+    python master_recreate_v3.py --config /path/to/mapping_master_config.yaml --dry-run
+"""
+
+import argparse
+import json
+import logging
+import os
+import sys
+from datetime import date, datetime, timezone, timedelta
+from pathlib import Path
+
+import pandas as pd
+import mysql.connector
+from sqlalchemy import create_engine, text
+
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+# ─── Logging ──────────────────────────────────────────────────────────────────
+
+def setup_logging(state_dir):
+    os.makedirs(state_dir, exist_ok=True)
+    runner_dir = os.path.join(state_dir, "v3_master_runner")
+    os.makedirs(runner_dir, exist_ok=True)
+    log_file = os.path.join(runner_dir, f"v3_master_{date.today().isoformat()}.log")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(message)s",
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler(sys.stdout),
+        ],
+    )
+
+
+# ─── State ────────────────────────────────────────────────────────────────────
+
+class MasterStateManager:
+
+    def __init__(self, state_dir):
+        self.state_file = os.path.join(state_dir, "v3_master_state.json")
+        os.makedirs(state_dir, exist_ok=True)
+
+    def load(self):
+        if not os.path.exists(self.state_file):
+            return {}
+        with open(self.state_file) as f:
+            return json.load(f)
+
+    def save(self, state):
+        with open(self.state_file, "w") as f:
+            json.dump(state, f, indent=4)
+
+
+# ─── Patient map loading ──────────────────────────────────────────────────────
+
+def load_patient_maps_from_mysql(mysql_conn_params, identifier_columns):
+    """
+    Load patient_mapping_table into per-column dicts: {col → {val → nd_patient_id}}.
+    Same structure as _load_patient_maps_from_db in the mapping script.
+    """
+    conn = mysql.connector.connect(**mysql_conn_params)
+    cursor = conn.cursor(dictionary=True)
+    id_cols_csv = ", ".join(f"`{c}`" for c in identifier_columns)
+    cursor.execute(f"SELECT {id_cols_csv}, nd_patient_id FROM patient_mapping_table")
+    rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
+
+    patient_maps_by_col = {col: {} for col in identifier_columns}
+    for row in rows:
+        nd_pid = row["nd_patient_id"]
+        for col in identifier_columns:
+            val = row.get(col)
+            if val is not None:
+                patient_maps_by_col[col][val] = nd_pid
+    logging.info(
+        f"Loaded {len(next(iter(patient_maps_by_col.values()), {}))} patients "
+        f"across {len(identifier_columns)} identifier columns."
+    )
+    return patient_maps_by_col
+
+
+# ─── nd_patient_id resolution ─────────────────────────────────────────────────
+
+def resolve_nd_patient_ids_df(df, patient_maps_by_col, join_cols):
+    """
+    Add nd_patient_id to each DataFrame row using an ordered-fallback across join_cols.
+    For each row: try join_cols[0]; if no match, try join_cols[1]; etc.
+    This is NOT a multi-column AND join — it is a prioritised single-column lookup per row.
+    """
+    nd_pids = pd.Series(pd.NA, index=df.index, dtype="Int64")
+    for col in join_cols:
+        if col not in df.columns:
+            logging.warning(f"join_col '{col}' not in source SQL result — skipping.")
+            continue
+        col_map = patient_maps_by_col.get(col, {})
+        mapped  = df[col].map(col_map)
+        try:
+            mapped = mapped.astype("Int64")
+        except (TypeError, ValueError):
+            pass
+        nd_pids = nd_pids.combine_first(mapped)
+    return nd_pids
+
+
+# ─── Source query ─────────────────────────────────────────────────────────────
+
+def execute_source_query_df(source_type, conn_params, sql_file_path):
+    """Execute a SELECT query and return results as a pandas DataFrame."""
+    query = Path(sql_file_path).read_text()
+    if source_type == "mssql":
+        import pymssql
+        conn = pymssql.connect(
+            server=conn_params["host"],
+            port=conn_params["port"],
+            database=conn_params["database"],
+            user=conn_params["user"],
+            password=conn_params["password"],
+        )
+        cursor = conn.cursor(as_dict=True)
+        cursor.execute(query)
+        rows = cursor.fetchall()
+        conn.close()
+        return pd.DataFrame(rows)
+    else:
+        conn = mysql.connector.connect(**conn_params)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(query)
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return pd.DataFrame(rows)
+
+
+# ─── Table rotation ───────────────────────────────────────────────────────────
+
+def rotate_table(mysql_engine, table_name):
+    """Rename {table} → {table}_old (drop {table}_old first if it exists)."""
+    logging.info(f"Rotating table: {table_name}")
+    with mysql_engine.connect() as conn:
+        conn.execute(text(f"DROP TABLE IF EXISTS `{table_name}_old`"))
+        result = conn.execute(
+            text(
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema = DATABASE() AND table_name = :t"
+            ),
+            {"t": table_name},
+        ).scalar()
+        if result:
+            conn.execute(text(f"RENAME TABLE `{table_name}` TO `{table_name}_old`"))
+            logging.info(f"Renamed {table_name} → {table_name}_old")
+        conn.commit()
+
+
+# ─── Single master table transfer ─────────────────────────────────────────────
+
+def transfer_master_table(
+    source_type, source_conn_params, mysql_conn_params,
+    table_cfg, patient_maps_by_col, dry_run=False,
+):
+    name         = table_cfg["name"]
+    sql_file     = table_cfg["sql_file"]
+    join_cols    = table_cfg["join_cols"]
+    target_table = table_cfg["target_table"]
+
+    logging.info(f"[{name}] Fetching source data from SQL file.")
+    df = execute_source_query_df(source_type, source_conn_params, sql_file)
+    logging.info(f"[{name}] Fetched {len(df)} rows.")
+
+    df.drop_duplicates(inplace=True)
+    logging.info(f"[{name}] {len(df)} rows after dedup.")
+
+    # Validate at least one join_col is present in the result
+    present = [c for c in join_cols if c in df.columns]
+    if not present:
+        raise ValueError(
+            f"[{name}] Source SQL must return at least one of join_cols {join_cols}. "
+            f"Got columns: {list(df.columns)}"
+        )
+
+    df["nd_patient_id"] = resolve_nd_patient_ids_df(df, patient_maps_by_col, join_cols)
+
+    unmapped = df["nd_patient_id"].isna().sum()
+    if unmapped:
+        logging.warning(
+            f"[{name}] {unmapped} rows have no nd_patient_id match "
+            f"across join_cols {join_cols}. Written with NULL nd_patient_id."
+        )
+
+    if dry_run:
+        logging.info(f"[DRY RUN] [{name}] Would write {len(df)} rows to {target_table}.")
+        return {"success": True, "row_count": len(df), "unmapped_rows": int(unmapped), "dry_run": True}
+
+    mysql_url    = (
+        f"mysql+mysqlconnector://{mysql_conn_params['user']}:{mysql_conn_params['password']}"
+        f"@{mysql_conn_params['host']}/{mysql_conn_params['database']}"
+    )
+    mysql_engine = create_engine(mysql_url)
+
+    rotate_table(mysql_engine, target_table)
+
+    df.to_sql(
+        target_table,
+        con=mysql_engine,
+        index=False,
+        if_exists="replace",
+        chunksize=1000,
+    )
+    logging.info(f"[{name}] Written {len(df)} rows to {target_table}.")
+
+    return {"success": True, "row_count": len(df), "unmapped_rows": int(unmapped)}
+
+
+# ─── Top-level ETL ────────────────────────────────────────────────────────────
+
+def run_master_etl(config, source_conn_params, mysql_conn_params, dry_run=False):
+    master_tables = config.get("master_tables", [])
+    if not master_tables:
+        logging.warning("No master_tables defined in config. Nothing to do.")
+        return {}
+
+    identifier_columns = config["patient"]["identifier_columns"]
+    source_type        = config["source_type"]
+
+    patient_maps_by_col = load_patient_maps_from_mysql(mysql_conn_params, identifier_columns)
+
+    results = {}
+    for table_cfg in master_tables:
+        name = table_cfg["name"]
+        logging.info(f"Processing master table: {name}")
+        result = transfer_master_table(
+            source_type, source_conn_params, mysql_conn_params,
+            table_cfg, patient_maps_by_col, dry_run,
+        )
+        results[name] = result
+
+    return results
+
+
+# ─── Entry point ──────────────────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(description="V3 Master Recreate")
+    parser.add_argument("--config", required=True, help="Path to YAML mapping+master config file")
+    parser.add_argument("--dry-run", action="store_true", help="Log actions without writing to DB")
+    args = parser.parse_args()
+
+    # Reuse load_config from the mapping script (validates master_tables too)
+    sys.path.insert(0, os.path.dirname(__file__))
+    from incremental_mapping_update_v3 import load_config
+    config = load_config(args.config)
+
+    from db_config import STATE_DIR, V3_MAPPING_SOURCE_CONN, V3_MAPPING_MYSQL_CONN
+
+    state_dir = os.path.join(STATE_DIR, "mapping_master_v3")
+    setup_logging(state_dir)
+
+    state_manager = MasterStateManager(state_dir)
+    state         = state_manager.load()
+    today         = datetime.now(IST).date().isoformat()
+
+    # Check if all master tables already ran successfully today
+    master_tables = config.get("master_tables", [])
+    if not args.dry_run and master_tables:
+        all_done = all(
+            state.get(tbl["name"], {}).get("last_processed_date") == today
+            and state.get(tbl["name"], {}).get("success")
+            for tbl in master_tables
+        )
+        if all_done:
+            logging.info("All master tables already processed successfully today. Skipping.")
+            return
+
+    logging.info("Starting V3 Master Recreate ETL")
+
+    try:
+        results = run_master_etl(config, V3_MAPPING_SOURCE_CONN, V3_MAPPING_MYSQL_CONN, args.dry_run)
+        for name, result in results.items():
+            state[name] = {"last_processed_date": today, **result}
+        state_manager.save(state)
+        logging.info(f"V3 Master Recreate completed: {results}")
+
+    except Exception as e:
+        logging.exception("V3 Master Recreate failed")
+        for tbl in master_tables:
+            state[tbl["name"]] = {"last_processed_date": today, "success": False, "error": str(e)}
+        state_manager.save(state)
+        raise
+
+
+if __name__ == "__main__":
+    main()

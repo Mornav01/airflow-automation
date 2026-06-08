@@ -1,10 +1,10 @@
 """
-Tests for mssql_incremental_mapping_update_v3.py
+Tests for incremental_mapping_update_v3.py
 
 Unit tests cover pure functions without any DB/network calls.
 Integration tests mock pymssql and mysql.connector to test full phases.
 
-Run: pytest tests/test_mssql_incremental_mapping_update_v3.py -v
+Run: pytest tests/test_incremental_mapping_update_v3.py -v
 """
 
 import sys
@@ -25,7 +25,7 @@ sys.modules.setdefault("mysql.connector", MagicMock())
 # ── Import the module under test ──────────────────────────────────────────────
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Airflow", "scripts"))
 
-from mssql_incremental_mapping_update_v3 import (
+from incremental_mapping_update_v3 import (
     load_config,
     validate_identifier_uniqueness,
     validate_patient_sql_columns,
@@ -395,7 +395,7 @@ def test_load_child_table_state_inactive_not_in_source_id_map():
 # run_patient_phase — integration with mocked execute_source_query
 # ══════════════════════════════════════════════════════════════════════════════
 
-@patch("mssql_incremental_mapping_update_v3.execute_source_query")
+@patch("incremental_mapping_update_v3.execute_source_query")
 def test_patient_phase_inserts_new_patients(mock_execute):
     src_rows = [
         {"patientid": 1, "profileid": 10, "pid": 100, "registration_date": None},
@@ -419,7 +419,7 @@ def test_patient_phase_inserts_new_patients(mock_execute):
     assert 2 in maps["patientid"]
 
 
-@patch("mssql_incremental_mapping_update_v3.execute_source_query")
+@patch("incremental_mapping_update_v3.execute_source_query")
 def test_patient_phase_skips_existing_patients(mock_execute):
     mock_execute.return_value = [
         {"patientid": 1, "profileid": 10, "pid": 100, "registration_date": None},
@@ -439,7 +439,7 @@ def test_patient_phase_skips_existing_patients(mock_execute):
     mysql_cursor.executemany.assert_not_called()
 
 
-@patch("mssql_incremental_mapping_update_v3.execute_source_query")
+@patch("incremental_mapping_update_v3.execute_source_query")
 def test_patient_phase_dry_run_does_not_write(mock_execute):
     mock_execute.return_value = [
         {"patientid": 1, "profileid": 10, "pid": 100, "registration_date": None},
@@ -458,7 +458,7 @@ def test_patient_phase_dry_run_does_not_write(mock_execute):
     mysql_cursor.executemany.assert_not_called()
 
 
-@patch("mssql_incremental_mapping_update_v3.execute_source_query")
+@patch("incremental_mapping_update_v3.execute_source_query")
 def test_patient_phase_invalid_identifiers_aborts(mock_execute):
     mock_execute.return_value = [
         {"patientid": 1, "profileid": 10, "pid": 100, "registration_date": None},
@@ -500,7 +500,7 @@ def _child_mysql_mock(existing_child_rows):
     return conn, cursor
 
 
-@patch("mssql_incremental_mapping_update_v3.execute_source_query")
+@patch("incremental_mapping_update_v3.execute_source_query")
 def test_child_phase_inserts_new_rows(mock_execute):
     mock_execute.return_value = [
         {"encounter_id": "E1", "patientid": 1, "encounter_date": None},
@@ -518,7 +518,7 @@ def test_child_phase_inserts_new_rows(mock_execute):
     assert mysql_cursor.executemany.called
 
 
-@patch("mssql_incremental_mapping_update_v3.execute_source_query")
+@patch("incremental_mapping_update_v3.execute_source_query")
 def test_child_phase_skips_existing_active(mock_execute):
     mock_execute.return_value = [
         {"encounter_id": "E1", "patientid": 1, "encounter_date": None}
@@ -538,7 +538,7 @@ def test_child_phase_skips_existing_active(mock_execute):
     mysql_cursor.executemany.assert_not_called()
 
 
-@patch("mssql_incremental_mapping_update_v3.execute_source_query")
+@patch("incremental_mapping_update_v3.execute_source_query")
 def test_child_phase_transfer_deactivates_and_reinserts(mock_execute):
     # E1 currently belongs to patient 1; source now says it belongs to patient 2.
     mock_execute.return_value = [
@@ -559,7 +559,7 @@ def test_child_phase_transfer_deactivates_and_reinserts(mock_execute):
     assert stats["new_rows"] == 1
 
 
-@patch("mssql_incremental_mapping_update_v3.execute_source_query")
+@patch("incremental_mapping_update_v3.execute_source_query")
 def test_child_phase_transfer_not_double_inserted_in_same_run(mock_execute):
     # E1 appears twice in source — both pointing to patient 2 after transfer.
     mock_execute.return_value = [
@@ -581,7 +581,7 @@ def test_child_phase_transfer_not_double_inserted_in_same_run(mock_execute):
     assert stats["new_rows"] == 1   # not 2 — second occurrence skipped
 
 
-@patch("mssql_incremental_mapping_update_v3.execute_source_query")
+@patch("incremental_mapping_update_v3.execute_source_query")
 def test_child_phase_unmapped_patient_skipped(mock_execute):
     mock_execute.return_value = [
         {"encounter_id": "E_ORPHAN", "patientid": 999, "encounter_date": None},
@@ -597,7 +597,7 @@ def test_child_phase_unmapped_patient_skipped(mock_execute):
     mysql_cursor.executemany.assert_not_called()
 
 
-@patch("mssql_incremental_mapping_update_v3.execute_source_query")
+@patch("incremental_mapping_update_v3.execute_source_query")
 def test_child_phase_dry_run_no_writes(mock_execute):
     mock_execute.return_value = [
         {"encounter_id": "E1", "patientid": 1, "encounter_date": None}
@@ -615,7 +615,7 @@ def test_child_phase_dry_run_no_writes(mock_execute):
     mysql_cursor.executemany.assert_not_called()
 
 
-@patch("mssql_incremental_mapping_update_v3.execute_source_query")
+@patch("incremental_mapping_update_v3.execute_source_query")
 def test_child_phase_fallback_ref_col_used(mock_execute):
     # Row has patientid=None but profileid=10 → should resolve via fallback
     mock_execute.return_value = [
@@ -636,7 +636,7 @@ def test_child_phase_fallback_ref_col_used(mock_execute):
 # nd_id continuity — second run inserts nothing for same source data
 # ══════════════════════════════════════════════════════════════════════════════
 
-@patch("mssql_incremental_mapping_update_v3.execute_source_query")
+@patch("incremental_mapping_update_v3.execute_source_query")
 def test_incremental_run_no_duplicates(mock_execute):
     """Second run with identical source data must be a no-op."""
     mock_execute.return_value = [
@@ -665,7 +665,7 @@ def test_incremental_run_no_duplicates(mock_execute):
 # nd_id sequence correctness
 # ══════════════════════════════════════════════════════════════════════════════
 
-@patch("mssql_incremental_mapping_update_v3.execute_source_query")
+@patch("incremental_mapping_update_v3.execute_source_query")
 def test_nd_id_sequence_for_multiple_encounters_per_patient(mock_execute):
     mock_execute.return_value = [
         {"encounter_id": "E1", "patientid": 1, "encounter_date": None},
@@ -904,7 +904,7 @@ def test_dedup_keeps_first_occurrence():
     assert result[0]["registration_date"] == "2024-01-01"   # first occurrence kept
 
 
-@patch("mssql_incremental_mapping_update_v3.execute_source_query")
+@patch("incremental_mapping_update_v3.execute_source_query")
 def test_patient_phase_deduplicates_source_before_insert(mock_execute):
     # 3 rows: patient 1 appears twice (dup), patient 2 once → only 2 should be inserted
     mock_execute.return_value = [
@@ -960,7 +960,7 @@ def test_dedup_child_source_data_null_source_id_passed_through():
     assert len(result) == 2   # NULL row is kept (not deduped out)
 
 
-@patch("mssql_incremental_mapping_update_v3.execute_source_query")
+@patch("incremental_mapping_update_v3.execute_source_query")
 def test_child_phase_deduplicates_source_before_insert(mock_execute):
     # 3 rows: E1 appears twice (dup), E2 once → only 2 should be inserted
     mock_execute.return_value = [
