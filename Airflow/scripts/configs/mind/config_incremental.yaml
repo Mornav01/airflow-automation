@@ -19,7 +19,7 @@ mappings_db:
   type: mysql
   host: localhost
   port: 3306
-  database: mapping
+  database: mapping_pg
   username: ${DEST_USER}
   password: ${DEST_PW}
 
