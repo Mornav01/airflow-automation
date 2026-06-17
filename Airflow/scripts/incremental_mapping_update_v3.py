@@ -624,6 +624,7 @@ def run_child_table_phase(
     new_rows        = []
     deactivate_list = []
     transferred_ids = set()
+    unmapped_count  = 0
 
     for row in src_data:
         source_id = row.get(source_id_col)
@@ -639,6 +640,7 @@ def run_child_table_phase(
 
         nd_pid = resolve_nd_patient_id(row, patient_maps_by_col, patient_ref_cols)
         if nd_pid is None:
+            unmapped_count += 1
             logging.warning(
                 f"[{mapping_table}] {source_id_col}={source_id} has no matching patient; skipping."
             )
@@ -670,9 +672,16 @@ def run_child_table_phase(
 
         new_rows.append((nd_pid, source_id, nd_id, row.get(date_col), now, now))
 
+    if unmapped_count:
+        logging.warning(
+            f"[{mapping_table}] {unmapped_count} row(s) skipped — "
+            f"patient identifier not found in patient_mapping_table. "
+            "Check that the patient SQL covers all patients referenced by this child query."
+        )
     logging.info(
         f"[{mapping_table}] New rows: {len(new_rows)}, "
-        f"Transfers to deactivate: {len(deactivate_list)}"
+        f"Transfers to deactivate: {len(deactivate_list)}, "
+        f"Skipped (unmapped patient): {unmapped_count}"
     )
 
     if deactivate_list and not dry_run:
@@ -710,8 +719,9 @@ def run_child_table_phase(
         logging.info(f"[DRY RUN] [{mapping_table}] Would insert {len(new_rows)} new rows.")
 
     return {
-        "new_rows":   len(new_rows),
-        "deactivated": len(deactivate_list),
+        "new_rows":        len(new_rows),
+        "deactivated":     len(deactivate_list),
+        "unmapped_patient": unmapped_count,
     }
 
 
