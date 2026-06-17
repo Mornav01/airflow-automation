@@ -100,6 +100,13 @@ with DAG(
     # ─────────────────────────────────────────────────────────
 
     def validate_pipeline(**context):
+        def _is_success(state: dict) -> bool:
+            if "success" in state:
+                return bool(state["success"])
+            # nested format: {"pii_data": {"success": true}, ...}
+            sub_states = [v for v in state.values() if isinstance(v, dict)]
+            return bool(sub_states) and all(v.get("success", False) for v in sub_states)
+
         state_files = {
             "v3_mapping": MAPPING_STATE_FILE,
             "v3_master":  MASTER_STATE_FILE,
@@ -117,7 +124,7 @@ with DAG(
             print(f"\n===== STATE: {name} =====")
             print(json.dumps(state, indent=4))
 
-            if not state.get("success", False):
+            if not _is_success(state):
                 failed.append(name)
 
         if failed:
