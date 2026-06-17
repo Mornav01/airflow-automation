@@ -28,8 +28,8 @@ join_db:
   host: 127.0.0.1
   port: 1437
   database: mobiledoc_base_0601
-  username: ${DEST_USER}
-  password: ${DEST_PW}
+  username: ${SOURCE_USER}
+  password: ${SOURCE_PW}
 
 # ── Namespace Key ────────────────────────────────────────────────────
 config_key: incremental

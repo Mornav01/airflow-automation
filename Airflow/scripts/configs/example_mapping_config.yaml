@@ -1,4 +1,5 @@
-# V3 mapping config for the Noran project.
+# V3 mapping + master config for the Noran project.
+# Used by both mssql_incremental_mapping_update_v3.py and master_recreate_v3.py.
 # Point sql_file paths to absolute paths on the Airflow worker.
 
 # source_type: 'mssql' or 'mysql'. Omit to default to 'mssql'.
@@ -54,3 +55,24 @@ child_tables:
     # use_len_guard: treat any existing nd_chart_id whose digit count is ≤ 15
     # (i.e. equal to nd_patient_id alone) as uninitialised and restart from base.
     use_len_guard: true
+
+
+master_tables:
+
+  - name: pii_data
+    # SQL must return at least one column listed in join_cols.
+    sql_file: /opt/airflow/Airflow/scripts/sql/master_pii_data_noran.sql
+    # Columns used to join source data to patient_mapping_table.
+    # Tried in order per row — first non-null match wins (NOT a multi-column AND join).
+    # Each entry must be in patient.identifier_columns.
+    join_cols:
+      - patientid
+      - profileid
+    # Destination MySQL table. Existing table is rotated to {target_table}_old before write.
+    target_table: pii_data_table
+
+  - name: master_insurance
+    sql_file: /opt/airflow/Airflow/scripts/sql/master_insurance_noran.sql
+    join_cols:
+      - profileid
+    target_table: master_insurance_table

@@ -11,7 +11,7 @@ patient:
   identifier_columns:
     - patientid
   # nd_patient_id starts at this value when the mapping table is empty.
-  base_nd_id: 1001001200000010001
+  base_nd_id: 100100120000001
 
 
 child_tables:
