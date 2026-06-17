@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 import pendulum
 from airflow import DAG
 from airflow.providers.standard.operators.python import PythonOperator
+from airflow.task.trigger_rule import TriggerRule
 
 # ──────────────────────────────────────────────
 # Config
@@ -22,17 +23,20 @@ sys.path.insert(0, os.path.abspath(os.path.join(SCRIPT_DIR, "..", "scripts")))
 
 from db_config import (  # noqa: E402
     STATE_DIR,
-    DEID_TABLES_CSV,  # noqa: F401 — kept for parity with gcp_transfer
-    AWS_TRANSFER_MYSQL_HOST       as MYSQL_HOST,
-    AWS_TRANSFER_MYSQL_PORT       as MYSQL_PORT,
-    AWS_TRANSFER_MYSQL_USER       as MYSQL_USER,
-    AWS_TRANSFER_MYSQL_PASSWORD   as MYSQL_PASSWORD,
-    AWS_TRANSFER_MYSQL_SCHEMA     as MYSQL_SCHEMA,
-    AWS_TRANSFER_MYSQLDUMP_PATH   as MYSQLDUMP_PATH,
-    AWS_TRANSFER_MYSQL_PATH       as MYSQL_PATH,
-    AWS_TRANSFER_S3_BUCKET        as S3_BUCKET,
-    AWS_TRANSFER_S3_PREFIX        as S3_PREFIX,
-    AWS_TRANSFER_OUTPUT_BASE      as OUTPUT_BASE,
+    DEID_TABLES_CSV,
+    AWS_TRANSFER_MYSQL_HOST            as MYSQL_HOST,
+    AWS_TRANSFER_MYSQL_PORT            as MYSQL_PORT,
+    AWS_TRANSFER_MYSQL_USER            as MYSQL_USER,
+    AWS_TRANSFER_MYSQL_PASSWORD        as MYSQL_PASSWORD,
+    AWS_TRANSFER_MYSQL_SCHEMA          as MYSQL_SCHEMA,
+    AWS_TRANSFER_MYSQLDUMP_PATH        as MYSQLDUMP_PATH,
+    AWS_TRANSFER_MYSQL_PATH            as MYSQL_PATH,
+    AWS_TRANSFER_S3_BUCKET             as S3_BUCKET,
+    AWS_TRANSFER_S3_PREFIX             as S3_PREFIX,
+    AWS_TRANSFER_OUTPUT_BASE           as OUTPUT_BASE,
+    AWS_TRANSFER_COUNT_SCHEMA          as COUNT_SCHEMA,
+    AWS_TRANSFER_COUNT_REPORT_LABEL    as COUNT_REPORT_LABEL,
+    AWS_TRANSFER_COUNT_S3_PREFIX       as COUNT_S3_PREFIX,
 )
 from s3_upload_service import s3_client, local_md5  # noqa: E402
 
@@ -318,6 +322,107 @@ def drop_tables(**context):
 
 
 # ──────────────────────────────────────────────
+# Count-report helpers
+# ──────────────────────────────────────────────
+
+def _mysql_query(schema: str, query: str) -> str:
+    """Run a single SQL query via the mysql CLI; return stripped stdout."""
+    result = subprocess.run(
+        [
+            MYSQL_PATH,
+            "-h", MYSQL_HOST,
+            "-P", MYSQL_PORT,
+            "-u", MYSQL_USER,
+            schema,
+            "--batch",
+            "--skip-column-names",
+            "-e", query,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=_mysql_env(),
+    )
+    return result.stdout.strip()
+
+
+def _table_exists(schema: str, table: str) -> bool:
+    out = _mysql_query(
+        "information_schema",
+        f"SELECT 1 FROM tables WHERE table_schema='{schema}' "
+        f"AND table_name='{table}' LIMIT 1",
+    )
+    return bool(out)
+
+
+def _count(schema: str, table: str, where: str = "") -> int:
+    q = f"SELECT COUNT(*) FROM `{table}`"
+    if where:
+        q += f" WHERE {where}"
+    return int(_mysql_query(schema, q) or 0)
+
+
+def upload_count_report(**context):
+    tables_csv = DEID_TABLES_CSV
+    schema     = COUNT_SCHEMA
+    dag_label  = COUNT_REPORT_LABEL
+
+    with open(tables_csv, newline="") as f:
+        tables = [r[0].strip() for r in csv.reader(f) if r and r[0].strip()]
+
+    snapshot_date = datetime.now().strftime("%Y-%m-%d")
+    rows, errors  = [], []
+
+    for table in tables:
+        if not _table_exists(schema, table):
+            print(f"SKIP missing: {table}")
+            continue
+        try:
+            total  = _count(schema, table)
+            active = _count(schema, table, where="nd_ActiveFlag = 'Y'")
+            rows.append({
+                "snapshot_date": snapshot_date,
+                "dag_id":        dag_label,
+                "table_name":    table,
+                "mac_total":     total,
+                "mac_active_y":  active,
+                "aws_total":     "",
+                "aws_active_y":  "",
+                "discrepancy":   "",
+                "created_at":    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            })
+            print(f"OK {table}: total={total} active={active}")
+        except Exception as e:
+            print(f"ERROR {table}: {e}")
+            errors.append({"table": table, "error": str(e)})
+
+    date_folder = resolve_date_folder(context["params"])
+    local_dir   = os.path.join(OUTPUT_BASE, date_folder)
+    os.makedirs(local_dir, exist_ok=True)
+    local_csv   = os.path.join(local_dir, "merge_stats.csv")
+
+    fieldnames = [
+        "snapshot_date", "dag_id", "table_name",
+        "mac_total", "mac_active_y",
+        "aws_total", "aws_active_y", "discrepancy",
+        "created_at",
+    ]
+    with open(local_csv, "w", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    client  = s3_client()
+    s3_key  = f"{COUNT_S3_PREFIX}/{date_folder}/merge_stats.csv"
+    client.upload_file(local_csv, S3_BUCKET, s3_key)
+    print(f"Uploaded {len(rows)} rows → s3://{S3_BUCKET}/{s3_key}")
+
+    if errors:
+        detail = "\n".join(f"  {e['table']}: {e['error']}" for e in errors)
+        raise RuntimeError(f"Errors for {len(errors)} table(s):\n{detail}")
+
+
+# ──────────────────────────────────────────────
 # DAG: incremental transfer pipeline (manual trigger)
 # ──────────────────────────────────────────────
 
@@ -356,3 +461,50 @@ with DAG(
     )
 
     get_tables_task >> dump_task >> upload_task >> drop_task
+
+
+# ──────────────────────────────────────────────
+# DAG 2: transfer pipeline + count-report task
+# ──────────────────────────────────────────────
+
+with DAG(
+    dag_id="mysql_dump_s3_transfer_with_count",
+    description="Dump → upload → drop tables, then upload count report to S3",
+    schedule=None,
+    start_date=pendulum.datetime(2026, 1, 1, tz=local_tz),
+    catchup=False,
+    default_args=default_args,
+    tags=["mysql", "s3", "dump", "count-report"],
+    params={
+        "date_folder": "",
+        "table_name": "",
+    },
+) as combined_dag:
+
+    get_tables_task_v2 = PythonOperator(
+        task_id="get_tables",
+        python_callable=get_tables,
+    )
+
+    dump_task_v2 = PythonOperator(
+        task_id="dump_tables",
+        python_callable=dump_tables,
+    )
+
+    upload_task_v2 = PythonOperator(
+        task_id="upload_to_s3",
+        python_callable=upload_to_s3,
+    )
+
+    drop_task_v2 = PythonOperator(
+        task_id="drop_tables",
+        python_callable=drop_tables,
+    )
+
+    count_report_task = PythonOperator(
+        task_id="upload_count_report",
+        python_callable=upload_count_report,
+        trigger_rule=TriggerRule.ALL_DONE,
+    )
+
+    get_tables_task_v2 >> dump_task_v2 >> upload_task_v2 >> drop_task_v2 >> count_report_task

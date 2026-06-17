@@ -10,7 +10,7 @@ import pandas as pd
 BATCH_INSERT_CHUNK = 1000
 DEACTIVATE_CHUNK   = 5000
 
-_NULL_LIKE_STRINGS = ["0000-00-00 00:00:00", "0000-00-00", "NaT", "nat", "NaN", "None"]
+_NULL_LIKE_STRINGS = ["0000-00-00 00:00:00", "0000-00-00", "NaT", "nat", "None"]
 
 
 # ──────────────────────────────────────────────────────────────────────────────

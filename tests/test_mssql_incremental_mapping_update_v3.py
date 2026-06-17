@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "Airflow", "scr
 from incremental_mapping_update_v3 import (
     load_config,
     validate_identifier_uniqueness,
+    validate_no_cross_patient_collision,
     validate_patient_sql_columns,
     validate_child_sql_columns,
     dedup_patient_source_data,
@@ -181,6 +182,72 @@ def test_validate_identifiers_null_values_handled():
 def test_validate_identifiers_single_column():
     src = [{"patientid": 1}, {"patientid": 2}, {"patientid": 1}]
     validate_identifier_uniqueness(src, ["patientid"])  # single col always 1:1 with itself
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# validate_no_cross_patient_collision
+# ══════════════════════════════════════════════════════════════════════════════
+
+_ID_COLS = ["patientid", "profileid", "pid"]
+
+def test_cross_collision_empty_src():
+    maps = {"patientid": {}, "profileid": {}, "pid": {}}
+    validate_no_cross_patient_collision([], maps, _ID_COLS)
+
+
+def test_cross_collision_all_new_patients():
+    src = [
+        {"patientid": 1, "profileid": 2, "pid": 3},
+        {"patientid": 4, "profileid": 5, "pid": 6},
+    ]
+    maps = {"patientid": {}, "profileid": {}, "pid": {}}
+    validate_no_cross_patient_collision(src, maps, _ID_COLS)
+
+
+def test_cross_collision_existing_patient_all_identifiers_match():
+    # All three identifiers already point to the same patient — no collision.
+    src = [{"patientid": 1, "profileid": 2, "pid": 3}]
+    maps = {"patientid": {1: 1001}, "profileid": {2: 1001}, "pid": {3: 1001}}
+    validate_no_cross_patient_collision(src, maps, _ID_COLS)
+
+
+def test_cross_collision_existing_patient_has_unknown_extra_identifier():
+    # patientid=1 is already mapped; pid=99 is not in DB.
+    # This row will be skipped by the insert loop, so Case 2 must NOT fire.
+    src = [{"patientid": 1, "profileid": 2, "pid": 99}]
+    maps = {"patientid": {1: 1001}, "profileid": {2: 1001}, "pid": {}}
+    validate_no_cross_patient_collision(src, maps, _ID_COLS)
+
+
+def test_cross_collision_case1_row_spans_two_existing_patients():
+    # patientid=1 → 1001, pid=3 → 1002: same row can't belong to both.
+    src = [{"patientid": 1, "profileid": 2, "pid": 3}]
+    maps = {"patientid": {1: 1001}, "profileid": {2: 1001}, "pid": {3: 1002}}
+    with pytest.raises(ValueError, match="Cross-patient collision"):
+        validate_no_cross_patient_collision(src, maps, _ID_COLS)
+
+
+def test_cross_collision_case2_new_patient_steals_identifier():
+    # patientid=5 is new; pid=3 already belongs to patient 1001.
+    src = [{"patientid": 5, "profileid": 6, "pid": 3}]
+    maps = {"patientid": {1: 1001}, "profileid": {2: 1001}, "pid": {3: 1001}}
+    with pytest.raises(ValueError, match="Identifier theft"):
+        validate_no_cross_patient_collision(src, maps, _ID_COLS)
+
+
+def test_cross_collision_case2_new_patient_steals_two_identifiers():
+    # patientid=5 is new; profileid=2 and pid=3 both already belong to 1001.
+    src = [{"patientid": 5, "profileid": 2, "pid": 3}]
+    maps = {"patientid": {1: 1001}, "profileid": {2: 1001}, "pid": {3: 1001}}
+    with pytest.raises(ValueError, match="Identifier theft"):
+        validate_no_cross_patient_collision(src, maps, _ID_COLS)
+
+
+def test_cross_collision_null_primary_id_ignored():
+    # patientid=None → insert loop would skip this row; Case 2 must not fire.
+    src = [{"patientid": None, "profileid": 6, "pid": 3}]
+    maps = {"patientid": {1: 1001}, "profileid": {2: 1001}, "pid": {3: 1001}}
+    validate_no_cross_patient_collision(src, maps, _ID_COLS)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -470,6 +537,25 @@ def test_patient_phase_invalid_identifiers_aborts(mock_execute):
     mysql_conn = MagicMock()
 
     with pytest.raises(ValueError, match="NOT 1:1"):
+        run_patient_phase(
+            "mssql", {"host": "x"}, mysql_conn, mysql_cursor, MINIMAL_CONFIG["patient"], NOW
+        )
+
+
+@patch("incremental_mapping_update_v3.execute_source_query")
+def test_patient_phase_aborts_on_identifier_theft(mock_execute):
+    # New patient (patientid=5) is carrying pid=100 which already belongs to patient 1001.
+    mock_execute.return_value = [
+        {"patientid": 5, "profileid": 20, "pid": 100, "registration_date": None},
+    ]
+    # fetchall returns the existing patient row so _load_patient_maps_from_db sees pid=100→1001.
+    existing_row = {"nd_patient_id": 100000000000001, "patientid": 1, "profileid": 10, "pid": 100}
+    mysql_cursor = MagicMock()
+    mysql_cursor.fetchall.return_value = [existing_row]
+    mysql_cursor.fetchone.return_value = {"max_id": 100000000000001}
+    mysql_conn = MagicMock()
+
+    with pytest.raises(ValueError, match="Identifier theft"):
         run_patient_phase(
             "mssql", {"host": "x"}, mysql_conn, mysql_cursor, MINIMAL_CONFIG["patient"], NOW
         )

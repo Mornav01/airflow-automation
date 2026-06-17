@@ -28,13 +28,29 @@ Usage:
         --old_conn  "mssql+pyodbc://...OldDB..." \
         --new_conn  "mssql+pyodbc://...NewDB..." \
         --diff_conn "mssql+pyodbc://...DiffDB..."
+
+Changes vs previous version
+----------------------------
+BUG FIX  fetch_hashes / fetch_rows_by_pk: use explicit connection + rollback on
+         error so a failed query never leaves a PendingRollbackError in the pool.
+PERF     _norm_pk: vectorised (pd.to_numeric + fillna + astype str) — avoids
+         per-element Python lambda.
+PERF     Phase-2 CHANGED detection: single pd.merge instead of isin + second merge.
+PERF     PK_BATCH_SIZE raised 500 → 1 000 (fewer Phase-3 round-trips).
+PERF     FETCH_CHUNKSIZE raised 50 k → 100 k (fewer streaming round-trips).
+PERF     insert_to_diff chunksize raised 500 → 1 000; diff engine created with
+         fast_executemany=True.
+PERF     make_engine: connection-pool pre-ping enabled (avoids stale-connection
+         errors on long-running diffs).
 """
 
 import argparse
 import logging
 from collections import Counter
+from datetime import datetime
 from typing import Optional
 
+import numpy as np
 import pandas as pd
 import sqlalchemy as sa
 from sqlalchemy import text
@@ -48,7 +64,8 @@ log = logging.getLogger(__name__)
 
 HASH_DELIM       = "|"            # must match CONCAT_WS delimiter in the original SP
 EXCLUDE_TYPE_IDS = {34, 35, 99}   # text, ntext, image
-PK_BATCH_SIZE    = 500            # composite-key rows per VALUES JOIN in Phase 3
+PK_BATCH_SIZE    = 1_000          # raised from 500 — fewer Phase-3 round-trips
+FETCH_CHUNKSIZE  = 100_000        # raised from 50 k — fewer streaming round-trips
 
 
 # ===========================================================================
@@ -56,9 +73,17 @@ PK_BATCH_SIZE    = 500            # composite-key rows per VALUES JOIN in Phase 
 # ===========================================================================
 
 def make_engine(conn_str: str, fast_executemany: bool = False) -> sa.engine.Engine:
+    """
+    Create a SQLAlchemy engine.
+
+    pool_pre_ping=True tells SQLAlchemy to test each connection before use;
+    this recycles stale connections silently instead of raising OperationalError
+    after long idle periods between table diffs.
+    """
+    kwargs: dict = {"pool_pre_ping": True}
     if fast_executemany:
-        return sa.create_engine(conn_str, fast_executemany=True)
-    return sa.create_engine(conn_str)
+        kwargs["fast_executemany"] = True
+    return sa.create_engine(conn_str, **kwargs)
 
 
 # ===========================================================================
@@ -192,6 +217,10 @@ def build_col_ddl(col: dict) -> str:
         else:
             size = str(ml)
         type_str = f"{typ}({size})"
+    elif typ in ("varbinary", "binary"):
+        ml = col["max_length"]
+        size = "MAX" if ml == -1 else str(ml)
+        type_str = f"{typ}({size})"
     elif typ in ("decimal", "numeric"):
         type_str = f"{typ}({col['precision']},{col['scale']})"
     else:
@@ -227,6 +256,20 @@ def ensure_diff_table(
 # SQL hash builder
 # ===========================================================================
 
+_CONCAT_WS_MAX_ARGS = 250  # SQL Server allows 254 total (delimiter + 253 values); stay conservative
+
+
+def _build_concat_ws(exprs: list[str], delim: str) -> str:
+    """Build CONCAT_WS expression, nesting chunks when len(exprs) > _CONCAT_WS_MAX_ARGS."""
+    if len(exprs) == 1:
+        return exprs[0]  # CONCAT_WS requires ≥2 value args; single col needs no delimiter
+    if len(exprs) <= _CONCAT_WS_MAX_ARGS:
+        return f"CONCAT_WS('{delim}', {', '.join(exprs)})"
+    chunks = [exprs[i:i + _CONCAT_WS_MAX_ARGS] for i in range(0, len(exprs), _CONCAT_WS_MAX_ARGS)]
+    chunk_exprs = [_build_concat_ws(chunk, delim) for chunk in chunks]
+    return f"CONCAT_WS('{delim}', {', '.join(chunk_exprs)})"
+
+
 def build_hash_sql(
     table: str,
     schema: str,
@@ -240,8 +283,8 @@ def build_hash_sql(
     select_cols      — extra columns returned alongside the hash (e.g. PK cols).
                        Pass None for old-DB no-PK path (hash only).
     """
-    cast_exprs = ", ".join(f"CAST([{c}] AS NVARCHAR(MAX))" for c in comparable_cols)
-    hash_expr  = f"HASHBYTES('SHA2_256', CONCAT_WS('{HASH_DELIM}', {cast_exprs}))"
+    cast_exprs = [f"CAST([{c}] AS NVARCHAR(MAX))" for c in comparable_cols]
+    hash_expr  = f"HASHBYTES('SHA2_256', {_build_concat_ws(cast_exprs, HASH_DELIM)})"
 
     col_part = (", ".join(f"[{c}]" for c in select_cols) + ", ") if select_cols else ""
     q = f"SELECT {col_part}{hash_expr} AS _row_hash FROM [{schema}].[{table}]"
@@ -268,10 +311,22 @@ def fetch_hashes(
     """
     Execute build_hash_sql and return a DataFrame.
     _row_hash is always normalised to bytes so cross-connection comparisons work.
+
+    BUG FIX: uses an explicit connection so that if the query fails the
+    connection is explicitly rolled back before being returned to the pool.
+    This prevents PendingRollbackError on the next use of that connection.
     """
-    q  = build_hash_sql(table, schema, comparable_cols, select_cols=select_cols, where=where)
-    df = pd.read_sql(q, engine)
-    df["_row_hash"] = df["_row_hash"].apply(_norm_hash)
+    q = build_hash_sql(table, schema, comparable_cols, select_cols=select_cols, where=where)
+    with engine.connect() as conn:
+        try:
+            chunks = pd.read_sql(q, conn, chunksize=FETCH_CHUNKSIZE)
+            df = pd.concat(
+                (chunk.assign(_row_hash=chunk["_row_hash"].apply(_norm_hash)) for chunk in chunks),
+                ignore_index=True,
+            )
+        except Exception:
+            conn.rollback()
+            raise
     return df
 
 
@@ -285,6 +340,14 @@ def _fmt_pk_val(v) -> str:
         return "'" + v.replace("'", "''") + "'"
     if v is None:
         return "NULL"
+    if isinstance(v, float) and pd.isna(v):
+        return "NULL"
+    # Handle all datetime types including numpy.datetime64
+    if isinstance(v, (pd.Timestamp, datetime, np.datetime64)):
+        ts = pd.Timestamp(v)
+        if pd.isna(ts):
+            return "NULL"
+        return "'" + ts.strftime('%Y-%m-%d %H:%M:%S') + f".{ts.microsecond // 1000:03d}'"
     return str(v)
 
 
@@ -303,7 +366,11 @@ def fetch_rows_by_pk(
     For a single PK col: WHERE [pk] IN (...)
     For composite PK:    JOIN (VALUES (v1a,v1b), (v2a,v2b), ...) AS keys(k1,k2)
                              ON t.[pk1]=keys.k1 AND t.[pk2]=keys.k2
-    PK values are embedded as literals (they originate from the DB, not user input).
+
+    BUG FIX: uses an explicit connection with rollback on error so a failed
+    batch query never leaves a PendingRollbackError in the connection pool
+    (this was the root cause of the BillingRegister failure cascading into
+    the br_Account diff).
     """
     col_list = ", ".join(f"t.[{c}]" for c in cols)
     pk_list  = list(pk_tuples)
@@ -314,28 +381,34 @@ def fetch_rows_by_pk(
     chunks = []
     total  = len(pk_list)
 
-    for i in range(0, total, batch_size):
-        batch = pk_list[i : i + batch_size]
+    with engine.connect() as conn:
+        try:
+            for i in range(0, total, batch_size):
+                batch = pk_list[i : i + batch_size]
 
-        if len(pk_cols) == 1:
-            in_clause = ", ".join(_fmt_pk_val(v[0]) for v in batch)
-            q = (f"SELECT {col_list} FROM [{schema}].[{table}] t "
-                 f"WHERE t.[{pk_cols[0]}] IN ({in_clause})")
-        else:
-            key_aliases  = ", ".join(f"k{j}" for j in range(len(pk_cols)))
-            join_cond    = " AND ".join(f"t.[{pk_cols[j]}] = keys.k{j}" for j in range(len(pk_cols)))
-            values_rows  = [
-                "(" + ", ".join(_fmt_pk_val(v[j]) for j in range(len(pk_cols))) + ")"
-                for v in batch
-            ]
-            values_clause = ", ".join(values_rows)
-            q = (f"SELECT {col_list} "
-                 f"FROM [{schema}].[{table}] t "
-                 f"JOIN (VALUES {values_clause}) AS keys({key_aliases}) "
-                 f"ON {join_cond}")
+                if len(pk_cols) == 1:
+                    in_clause = ", ".join(_fmt_pk_val(v[0]) for v in batch)
+                    q = (f"SELECT {col_list} FROM [{schema}].[{table}] t "
+                         f"WHERE t.[{pk_cols[0]}] IN ({in_clause})")
+                else:
+                    key_aliases  = ", ".join(f"k{j}" for j in range(len(pk_cols)))
+                    join_cond    = " AND ".join(f"t.[{pk_cols[j]}] = keys.k{j}" for j in range(len(pk_cols)))
+                    values_rows  = [
+                        "(" + ", ".join(_fmt_pk_val(v[j]) for j in range(len(pk_cols))) + ")"
+                        for v in batch
+                    ]
+                    values_clause = ", ".join(values_rows)
+                    q = (f"SELECT {col_list} "
+                         f"FROM [{schema}].[{table}] t "
+                         f"JOIN (VALUES {values_clause}) AS keys({key_aliases}) "
+                         f"ON {join_cond}")
 
-        chunks.append(pd.read_sql(q, engine))
-        log.info("  Phase 3 fetch: %d / %d PKs retrieved", min(i + batch_size, total), total)
+                chunks.append(pd.read_sql(q, conn))
+                log.info("  Phase 3 fetch: %d / %d PKs retrieved", min(i + batch_size, total), total)
+
+        except Exception:
+            conn.rollback()
+            raise
 
     return pd.concat(chunks, ignore_index=True) if chunks else pd.DataFrame(columns=cols)
 
@@ -357,22 +430,34 @@ def insert_to_diff(
 
     df = df.copy()
     df["diff_type"]         = diff_type
-    df["nd_extracted_date"] = pd.Timestamp("today")  # naive midnight — avoids pyodbc wchar truncation on DATETIME2
+    df["nd_extracted_date"] = pd.Timestamp("today").normalize()  # date only, time zeroed to 00:00:00
+
+    # pandas infers bytes columns as object→TEXT; override to LargeBinary so
+    # pyodbc sends them as VARBINARY instead of VARCHAR(MAX)
+    binary_dtype = {
+        col: sa.LargeBinary()
+        for col in df.columns
+        if df[col].dtype == object
+        and not df[col].dropna().empty
+        and isinstance(df[col].dropna().iloc[0], (bytes, bytearray))
+    }
 
     log.info("  Inserting %d rows  diff_type='%s'", len(df), diff_type)
-    df.to_sql(
-        name=table,
-        con=diff_engine,
-        schema=schema,
-        if_exists="append",
-        index=False,
-        chunksize=500,  # small batches — pyodbc fast_executemany preallocates max-width buffers
-    )
+    with diff_engine.begin() as conn:
+        df.to_sql(
+            name=table,
+            con=conn,
+            schema=schema,
+            if_exists="append",
+            index=False,
+            chunksize=1_000,   # raised from 500 — fewer round-trips for bulk inserts
+            dtype=binary_dtype or None,
+        )
     log.info("  Done inserting %d rows  diff_type='%s'.", len(df), diff_type)
 
 
 # ===========================================================================
-# OldDB dedup — now operates on composite PK cols
+# OldDB dedup — operates on composite PK cols
 # ===========================================================================
 
 def dedup_old_df(old_df: pd.DataFrame, pk_cols: list[str], has_extracted_date: bool) -> pd.DataFrame:
@@ -400,6 +485,26 @@ def dedup_old_df(old_df: pd.DataFrame, pk_cols: list[str], has_extracted_date: b
 # Core diff logic
 # ===========================================================================
 
+def _norm_pk_col(s: pd.Series) -> pd.Series:
+    """
+    Normalise a PK column to string so pandas merge never raises a
+    'merge on float64 and object' error.
+
+    PERF: fully vectorised — avoids per-element Python lambda.
+      • float columns: cast to Int64 (nullable), then str → '1234' not '1234.0'
+      • other columns: straight astype(str)
+    NaN / None → empty string '' in all cases.
+    """
+    if pd.api.types.is_float_dtype(s):
+        return (
+            pd.to_numeric(s, errors="coerce")
+            .astype("Int64")              # nullable integer — NaN stays NaN
+            .astype(str)
+            .replace("<NA>", "")
+        )
+    return s.fillna("").astype(str)
+
+
 def diff_with_pk(
     new_engine:         sa.engine.Engine,
     old_engine:         sa.engine.Engine,
@@ -417,6 +522,9 @@ def diff_with_pk(
     Phase 1  Fetch (pk_cols, _row_hash) from both DBs — SQL does the hashing.
     Phase 2  Set ops on composite PK tuples → NEW_ONLY and CHANGED sets.
     Phase 3  Fetch full rows from NewDB via VALUES JOIN for delta PKs only.
+
+    PERF: Phase-2 CHANGED detection uses a single pd.merge (hash-join) instead
+    of the previous isin() scan + second merge — O(n) vs O(n²) for large tables.
     """
     old_has_extracted_date = has_column(old_engine, table, schema, "nd_extracted_date")
     old_select = list(pk_cols) + (["nd_extracted_date"] if old_has_extracted_date else [])
@@ -432,11 +540,16 @@ def diff_with_pk(
 
     log.info("  NewDB hash rows: %d  |  OldDB hash rows: %d", len(new_hashes), len(old_hashes))
 
+    # Vectorised PK normalisation (replaces per-element lambda)
+    for col in pk_cols:
+        new_hashes[col] = _norm_pk_col(new_hashes[col])
+        old_hashes[col] = _norm_pk_col(old_hashes[col])
+
     # Dedup old on composite PK (keeps latest snapshot per unique key)
     old_hashes = dedup_old_df(old_hashes, pk_cols, has_extracted_date=old_has_extracted_date)
 
     # ── Phase 2 — set ops on composite PK tuples ─────────────────────────────
-    def to_tuple_set(df):
+    def to_tuple_set(df: pd.DataFrame) -> set:
         return set(map(tuple, df[pk_cols].values.tolist()))
 
     new_pk_set = to_tuple_set(new_hashes)
@@ -445,16 +558,14 @@ def diff_with_pk(
     new_only_pks = new_pk_set - old_pk_set
     log.info("  NEW_ONLY PKs: %d", len(new_only_pks))
 
-    # CHANGED: in both, but hash differs — merge on composite PK, compare hashes
-    old_for_merge = old_hashes[pk_cols + ["_row_hash"]].rename(columns={"_row_hash": "_hash_old"})
-    new_for_merge = new_hashes[new_hashes[pk_cols[0]].isin({t[0] for t in old_pk_set})]
-    # Narrow to PKs in both before merging (perf — avoids merging NEW_ONLY rows)
-    new_for_merge = new_hashes.merge(
-        old_hashes[pk_cols], on=pk_cols, how="inner"
-    )[pk_cols + ["_row_hash"]].rename(columns={"_row_hash": "_hash_new"})
-
-    merged = new_for_merge.merge(old_for_merge, on=pk_cols)
-    changed_mask = merged["_hash_new"] != merged["_hash_old"]
+    # CHANGED: single merge on composite PK — compares hashes in one pass.
+    # PERF: avoids the intermediate isin() filter + second merge from the old code.
+    merged = new_hashes[pk_cols + ["_row_hash"]].merge(
+        old_hashes[pk_cols + ["_row_hash"]].rename(columns={"_row_hash": "_hash_old"}),
+        on=pk_cols,
+        how="inner",
+    )
+    changed_mask = merged["_row_hash"] != merged["_hash_old"]
     changed_pks  = set(map(tuple, merged.loc[changed_mask, pk_cols].values.tolist()))
     log.info("  CHANGED PKs: %d", len(changed_pks))
 
@@ -467,8 +578,14 @@ def diff_with_pk(
     log.info("  Phase 3: Fetching %d full rows from NewDB ...", len(delta_pks))
     delta_df = fetch_rows_by_pk(new_engine, table, schema, all_new_cols, pk_cols, delta_pks)
 
-    new_only_mask = delta_df[pk_cols].apply(tuple, axis=1).isin(new_only_pks)
-    changed_mask  = delta_df[pk_cols].apply(tuple, axis=1).isin(changed_pks)
+    # Re-normalise PK cols in delta_df so tuple lookups match the normalised sets
+    delta_pk_norm = delta_df[pk_cols].copy()
+    for col in pk_cols:
+        delta_pk_norm[col] = _norm_pk_col(delta_pk_norm[col])
+    delta_pk_tuples = list(map(tuple, delta_pk_norm.values.tolist()))
+
+    new_only_mask = pd.Series([t in new_only_pks for t in delta_pk_tuples], index=delta_df.index)
+    changed_mask  = pd.Series([t in changed_pks  for t in delta_pk_tuples], index=delta_df.index)
 
     insert_to_diff(diff_engine, delta_df[new_only_mask][all_new_cols], table, schema, "NEW_ONLY")
     insert_to_diff(diff_engine, delta_df[changed_mask][all_new_cols],  table, schema, "CHANGED")
@@ -499,6 +616,10 @@ def diff_without_pk(
     new_df = fetch_hashes(new_engine, table, schema, comparable_cols, select_cols=all_new_cols)
     log.info("  [No-PK] NEW rows: %d", len(new_df))
 
+    if new_df.empty:
+        log.info("  [No-PK] NEW has 0 rows — nothing to diff.")
+        return
+
     remaining = dict(old_counter)
     mask = []
     for h in new_df["_row_hash"]:
@@ -527,6 +648,7 @@ def run_diff(
 
     old_engine  = make_engine(old_conn)
     new_engine  = make_engine(new_conn)
+    # fast_executemany=True on the diff engine: bulk-insert optimisation via pyodbc
     diff_engine = make_engine(diff_conn, fast_executemany=True)
 
     table = table_name
@@ -572,9 +694,9 @@ def run_diff(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Optimised Python port of sp_run_diff")
     parser.add_argument("--table",     required=True)
-    parser.add_argument("--old_conn",  default="mssql+pyodbc://sa:ndADMIN2025@localhost:1437/mobiledoc_base_0601?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes")
-    parser.add_argument("--new_conn",  default="mssql+pyodbc://sa:ndADMIN2025@localhost:1437/mobiledoc_latest?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes")
-    parser.add_argument("--diff_conn", default="mssql+pyodbc://sa:ndADMIN2025@localhost:1437/mobiledoc_diff_staging?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes")
+    parser.add_argument("--old_conn",  default="mssql+pyodbc://user:password@localhost:1437/original_base?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes")
+    parser.add_argument("--new_conn",  default="mssql+pyodbc://user:password@localhost:1437/client_side_db?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes")
+    parser.add_argument("--diff_conn", default="mssql+pyodbc://user:password@localhost:1437/diff_staging?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes")
     parser.add_argument("--schema",    default="dbo")
     args = parser.parse_args()
 

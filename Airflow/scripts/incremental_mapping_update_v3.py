@@ -398,6 +398,51 @@ def execute_source_query(source_type, conn_params, sql_file_path):
         conn.close()
 
 
+# ─── QC: cross-run collision check ───────────────────────────────────────────
+
+def validate_no_cross_patient_collision(src_data, patient_maps_by_col, identifier_columns):
+    """
+    Fail if any incoming row has identifier values that already resolve to two
+    different nd_patient_ids in the DB.
+
+    Two cases detected:
+    - Case 1: a row's identifiers span two different existing patients.
+    - Case 2: a brand-new patient row carries an identifier already owned by
+      an existing patient, which would make that identifier ambiguous on the
+      next run.  Gated on first_val is not None — null-primary rows are
+      harmlessly skipped by the insert loop and produce no DB change.
+    """
+    first_id_col = identifier_columns[0]
+    first_id_map = patient_maps_by_col.get(first_id_col, {})
+
+    for row in src_data:
+        resolved = {}
+        for col in identifier_columns:
+            val = row.get(col)
+            if val is None:
+                continue
+            nd_pid = patient_maps_by_col.get(col, {}).get(val)
+            if nd_pid is not None:
+                resolved[col] = nd_pid
+
+        unique_pids = set(resolved.values())
+
+        if len(unique_pids) > 1:
+            raise ValueError(
+                f"Cross-patient collision: incoming row {dict(row)} resolves to "
+                f"multiple existing nd_patient_ids {unique_pids} "
+                f"(via columns {resolved}). ETL aborted."
+            )
+
+        first_val      = row.get(first_id_col)
+        is_new_patient = first_val is not None and first_val not in first_id_map
+        if is_new_patient and resolved:
+            raise ValueError(
+                f"Identifier theft: new patient row {dict(row)} contains identifier(s) "
+                f"already mapped to existing nd_patient_id(s) {resolved}. ETL aborted."
+            )
+
+
 # ─── Patient phase ────────────────────────────────────────────────────────────
 
 def _load_patient_maps_from_db(mysql_cursor, identifier_columns):
@@ -445,6 +490,8 @@ def run_patient_phase(source_type, source_conn_params, mysql_conn, mysql_cursor,
 
     patient_maps_by_col = _load_patient_maps_from_db(mysql_cursor, identifier_columns)
     logging.info(f"[patient] Loaded {len(patient_maps_by_col[first_id_col])} existing patients.")
+
+    validate_no_cross_patient_collision(src_data, patient_maps_by_col, identifier_columns)
 
     mysql_cursor.execute(
         f"SELECT COALESCE(MAX(nd_patient_id), {base_nd_id - 1}) AS max_id "

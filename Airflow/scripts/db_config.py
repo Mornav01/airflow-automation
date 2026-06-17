@@ -108,6 +108,7 @@ V2_MAPPING_PATIENT_IDENTIFIER_COLUMNS  = [
 V2_MASTER_PII_DATA_JOIN_COLUMN         = os.environ["V2_MASTER_PII_DATA_JOIN_COLUMN"]
 V2_MASTER_INSURANCE_JOIN_COLUMN        = os.environ["V2_MASTER_INSURANCE_JOIN_COLUMN"]
 
+
 # ── AWS transfer (aws_transfer.py) ───────────────────────────────
 AWS_TRANSFER_MYSQL_HOST            = os.environ["AWS_TRANSFER_MYSQL_HOST"]
 AWS_TRANSFER_MYSQL_PORT            = os.environ["AWS_TRANSFER_MYSQL_PORT"]
@@ -122,6 +123,10 @@ AWS_TRANSFER_S3_REGION             = os.environ["AWS_TRANSFER_S3_REGION"]
 AWS_TRANSFER_AWS_ACCESS_KEY_ID     = os.environ["AWS_TRANSFER_AWS_ACCESS_KEY_ID"]
 AWS_TRANSFER_AWS_SECRET_ACCESS_KEY = os.environ["AWS_TRANSFER_AWS_SECRET_ACCESS_KEY"]
 AWS_TRANSFER_OUTPUT_BASE           = os.environ["AWS_TRANSFER_OUTPUT_BASE"]
+AWS_TRANSFER_COUNT_SCHEMA          = os.environ["AWS_TRANSFER_COUNT_SCHEMA"]
+AWS_TRANSFER_COUNT_REPORT_LABEL    = os.environ["AWS_TRANSFER_COUNT_REPORT_LABEL"]
+AWS_TRANSFER_COUNT_S3_PREFIX       = os.environ["AWS_TRANSFER_COUNT_S3_PREFIX"]
+
 
 # ── V3 Mapping connections & config ──────────────────────────────
 # Source DB — works for both MSSQL and MySQL sources (source_type in YAML picks the driver)
