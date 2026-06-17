@@ -1,0 +1,6 @@
+# Per-table batch_size overrides.
+# Tables listed here use the specified batch_size instead of deidentification.batch_size.
+# Tables not listed fall back to the global batch_size (currently 100000).
+
+InterfaceTransaction:
+  batch_size: 5000

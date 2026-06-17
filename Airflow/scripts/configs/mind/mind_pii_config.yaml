@@ -1,0 +1,348 @@
+mask:
+  Patient_AltPatientID:
+    masking_value: "((PATIENTI_IDENTIFIER))"
+  Patient_OrgPatientID:
+    masking_value: "((PATIENTI_IDENTIFIER))"
+  Person_FirstName:
+    masking_value: "((PATIENT_NAME))"
+  Person_MiddleName1:
+    masking_value: "((PATIENT_NAME))"
+  Person_MiddleName2:
+    masking_value: "((PATIENT_NAME))"
+  Person_LastName:
+    masking_value: "((PATIENT_NAME))"
+  Person_NickName:
+    masking_value: "((PATIENT_NAME))"
+  Person_MaidenName:
+    masking_value: "((PATIENT_NAME))"
+  Person_SSN:
+    masking_value: "((SSN))"
+  Person_DriverLicNum:
+    masking_value: "((DRIVERS_LICENSE))"
+  Person_Pager:
+    masking_value: "((PAGER_NO))"
+  Person_CellPhone1:
+    masking_value: "((PHONE_NUMBER))"
+  Person_CellPhone2:
+    masking_value: "((PHONE_NUMBER))"
+  Person_EMail1:
+    masking_value: "((EMAIL_ID))"
+  Person_EMail2:
+    masking_value: "((EMAIL_ID))"
+  Person_Occupation:
+    masking_value: "((OCCUPATION))"
+  Person_PrimaryPhone:
+    masking_value: "((PHONE_NUMBER))"
+  Person_PrimaryWorkPhone:
+    masking_value: "((PHONE_NUMBER))"
+  RESIDENTIAL_AddressLine1:
+    masking_value: "((RESIDENTIAL_PATIENT_ADDRESS))"
+  RESIDENTIAL_AddressLine2:
+    masking_value: "((RESIDENTIAL_PATIENT_ADDRESS))"
+  RESIDENTIAL_City:
+    masking_value: "((RESIDENTIAL_PATIENT_CITY))"
+  RESIDENTIAL_County:
+    masking_value: "((RESIDENTIAL_PATIENT_COUNTY))"
+  RESIDENTIAL_PhoneNum1:
+    masking_value: "((RESIDENTIAL_PHONE_NUMBER))"
+  RESIDENTIAL_PhoneNum2:
+    masking_value: "((RESIDENTIAL_PHONE_NUMBER))"
+  RESIDENTIAL_FaxNumber:
+    masking_value: "((RESIDENTIAL_FAX))"
+  PersonEmployers_PersonalPhoneNumber:
+    masking_value: "((PHONE_NUMBER))"
+  Employers_Name:
+    masking_value: "((EMPLOYER_NAME))"
+  Employers_Address1:
+    masking_value: "((EMPLOYER_ADDRESS))"
+  Employers_Address2:
+    masking_value: "((EMPLOYER_ADDRESS))"
+  Employers_City:
+    masking_value: "((EMPLOYER_CITY))"
+  Employers_County:
+    masking_value: "((EMPLOYER_COUNTY))"
+  Employers_Phone:
+    masking_value: "((EMPLOYER_PHONE))"
+  Employers_Fax:
+    masking_value: "((EMPLOYER_FAX))"
+  Employers_ContactName:
+    masking_value: "((EMPLOYER_DETAILS))"
+  BILLING_AddressLine1:
+    masking_value: "((BILLING_PATIENT_ADDRESS))"
+  BILLING_AddressLine2:
+    masking_value: "((BILLING_PATIENT_ADDRESS))"
+  BILLING_City:
+    masking_value: "((BILLING_PATIENT_CITY))"
+  BILLING_County:
+    masking_value: "((BILLING_PATIENT_COUNTY))"
+  BILLING_PhoneNum1:
+    masking_value: "((BILLING_PHONE_NUMBER))"
+  BILLING_PhoneNum2:
+    masking_value: "((BILLING_PHONE_NUMBER))"
+  BILLING_FaxNumber:
+    masking_value: "((BILLING_FAX))"
+
+dob:
+  Person_DateOfBirth:
+    masking_value: "((PATIENT_DOB))"
+
+regex:
+  Person_SSN:
+    masking_value: "((SSN))"
+    regex:
+      - '\b\d{3}[- ]\d{2}[- ]\d{4}\b'
+  Person_Pager:
+    masking_value: "((PAGER_NO))"
+    regex:
+      - '\(\d{3}\)\s*\d{3}-\d{4}'
+      - '\b\d{3}-\d{3}-\d{4}\b'
+      - '\+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b'
+      - '\b\d{3} \d{3} \d{4}\b'
+  Person_CellPhone1:
+    masking_value: "((PHONE_NUMBER))"
+    regex:
+      - '\(\d{3}\)\s*\d{3}-\d{4}'
+      - '\b\d{3}-\d{3}-\d{4}\b'
+      - '\+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b'
+      - '\b\d{3} \d{3} \d{4}\b'
+  Person_CellPhone2:
+    masking_value: "((PHONE_NUMBER))"
+    regex:
+      - '\(\d{3}\)\s*\d{3}-\d{4}'
+      - '\b\d{3}-\d{3}-\d{4}\b'
+      - '\+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b'
+      - '\b\d{3} \d{3} \d{4}\b'
+  Person_EMail1:
+    masking_value: "((EMAIL_ID))"
+    regex:
+      - '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b'
+  Person_EMail2:
+    masking_value: "((EMAIL_ID))"
+    regex:
+      - '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b'
+  Person_PrimaryPhone:
+    masking_value: "((PHONE_NUMBER))"
+    regex:
+      - '\(\d{3}\)\s*\d{3}-\d{4}'
+      - '\b\d{3}-\d{3}-\d{4}\b'
+      - '\+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b'
+      - '\b\d{3} \d{3} \d{4}\b'
+  Person_PrimaryWorkPhone:
+    masking_value: "((PHONE_NUMBER))"
+    regex:
+      - '\(\d{3}\)\s*\d{3}-\d{4}'
+      - '\b\d{3}-\d{3}-\d{4}\b'
+      - '\+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b'
+      - '\b\d{3} \d{3} \d{4}\b'
+  RESIDENTIAL_AddressLine1:
+    masking_value: "((RESIDENTIAL_PATIENT_ADDRESS))"
+    regex:
+      - |
+        (?ix)(?P<street_or_pobox>
+            (?:\d+[A-Za-z]{0,3}\s+[A-Za-z0-9\s.,'-]*)
+            |
+            (?:P\.?\s*O\.?\s*Box\s+\d+)
+        )
+        [,\s]+
+        (?P<city>[A-Za-z\s]+?)
+        [,\s]+
+        (?P<state>
+            AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|
+            MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|
+            SD|TN|TX|UT|VT|VA|WA|WV|WI|WY
+        )
+        [\s,]*
+        (?P<zip>\d{5}(?:-\d{4})?)
+  RESIDENTIAL_AddressLine2:
+    masking_value: "((RESIDENTIAL_PATIENT_ADDRESS))"
+    regex:
+      - |
+        (?ix)(?P<street_or_pobox>
+            (?:\d+[A-Za-z]{0,3}\s+[A-Za-z0-9\s.,'-]*)
+            |
+            (?:P\.?\s*O\.?\s*Box\s+\d+)
+        )
+        [,\s]+
+        (?P<city>[A-Za-z\s]+?)
+        [,\s]+
+        (?P<state>
+            AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|
+            MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|
+            SD|TN|TX|UT|VT|VA|WA|WV|WI|WY
+        )
+        [\s,]*
+        (?P<zip>\d{5}(?:-\d{4})?)
+  RESIDENTIAL_PhoneNum1:
+    masking_value: "((RESIDENTIAL_PHONE_NUMBER))"
+    regex:
+      - '\(\d{3}\)\s*\d{3}-\d{4}'
+      - '\b\d{3}-\d{3}-\d{4}\b'
+      - '\+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b'
+      - '\b\d{3} \d{3} \d{4}\b'
+  RESIDENTIAL_PhoneNum2:
+    masking_value: "((RESIDENTIAL_PHONE_NUMBER))"
+    regex:
+      - '\(\d{3}\)\s*\d{3}-\d{4}'
+      - '\b\d{3}-\d{3}-\d{4}\b'
+      - '\+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b'
+      - '\b\d{3} \d{3} \d{4}\b'
+  RESIDENTIAL_FaxNumber:
+    masking_value: "((RESIDENTIAL_FAX))"
+    regex:
+      - '\(\d{3}\)\s*\d{3}-\d{4}'
+      - '\b\d{3}-\d{3}-\d{4}\b'
+      - '\+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b'
+      - '\b\d{3} \d{3} \d{4}\b'
+  PersonEmployers_PersonalPhoneNumber:
+    masking_value: "((PHONE_NUMBER))"
+    regex:
+      - '\(\d{3}\)\s*\d{3}-\d{4}'
+      - '\b\d{3}-\d{3}-\d{4}\b'
+      - '\+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b'
+      - '\b\d{3} \d{3} \d{4}\b'
+  Employers_Address1:
+    masking_value: "((EMPLOYER_ADDRESS))"
+    regex:
+      - |
+        (?ix)(?P<street_or_pobox>
+            (?:\d+[A-Za-z]{0,3}\s+[A-Za-z0-9\s.,'-]*)
+            |
+            (?:P\.?\s*O\.?\s*Box\s+\d+)
+        )
+        [,\s]+
+        (?P<city>[A-Za-z\s]+?)
+        [,\s]+
+        (?P<state>
+            AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|
+            MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|
+            SD|TN|TX|UT|VT|VA|WA|WV|WI|WY
+        )
+        [\s,]*
+        (?P<zip>\d{5}(?:-\d{4})?)
+  Employers_Address2:
+    masking_value: "((EMPLOYER_ADDRESS))"
+    regex:
+      - |
+        (?ix)(?P<street_or_pobox>
+            (?:\d+[A-Za-z]{0,3}\s+[A-Za-z0-9\s.,'-]*)
+            |
+            (?:P\.?\s*O\.?\s*Box\s+\d+)
+        )
+        [,\s]+
+        (?P<city>[A-Za-z\s]+?)
+        [,\s]+
+        (?P<state>
+            AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|
+            MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|
+            SD|TN|TX|UT|VT|VA|WA|WV|WI|WY
+        )
+        [\s,]*
+        (?P<zip>\d{5}(?:-\d{4})?)
+  Employers_Phone:
+    masking_value: "((EMPLOYER_PHONE))"
+    regex:
+      - '\(\d{3}\)\s*\d{3}-\d{4}'
+      - '\b\d{3}-\d{3}-\d{4}\b'
+      - '\+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b'
+      - '\b\d{3} \d{3} \d{4}\b'
+  Employers_Fax:
+    masking_value: "((EMPLOYER_FAX))"
+    regex:
+      - '\(\d{3}\)\s*\d{3}-\d{4}'
+      - '\b\d{3}-\d{3}-\d{4}\b'
+      - '\+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b'
+      - '\b\d{3} \d{3} \d{4}\b'
+  BILLING_AddressLine1:
+    masking_value: "((BILLING_PATIENT_ADDRESS))"
+    regex:
+      - |
+        (?ix)(?P<street_or_pobox>
+            (?:\d+[A-Za-z]{0,3}\s+[A-Za-z0-9\s.,'-]*)
+            |
+            (?:P\.?\s*O\.?\s*Box\s+\d+)
+        )
+        [,\s]+
+        (?P<city>[A-Za-z\s]+?)
+        [,\s]+
+        (?P<state>
+            AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|
+            MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|
+            SD|TN|TX|UT|VT|VA|WA|WV|WI|WY
+        )
+        [\s,]*
+        (?P<zip>\d{5}(?:-\d{4})?)
+  BILLING_AddressLine2:
+    masking_value: "((BILLING_PATIENT_ADDRESS))"
+    regex:
+      - |
+        (?ix)(?P<street_or_pobox>
+            (?:\d+[A-Za-z]{0,3}\s+[A-Za-z0-9\s.,'-]*)
+            |
+            (?:P\.?\s*O\.?\s*Box\s+\d+)
+        )
+        [,\s]+
+        (?P<city>[A-Za-z\s]+?)
+        [,\s]+
+        (?P<state>
+            AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|
+            MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|
+            SD|TN|TX|UT|VT|VA|WA|WV|WI|WY
+        )
+        [\s,]*
+        (?P<zip>\d{5}(?:-\d{4})?)
+  BILLING_PhoneNum1:
+    masking_value: "((BILLING_PHONE_NUMBER))"
+    regex:
+      - '\(\d{3}\)\s*\d{3}-\d{4}'
+      - '\b\d{3}-\d{3}-\d{4}\b'
+      - '\+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b'
+      - '\b\d{3} \d{3} \d{4}\b'
+  BILLING_PhoneNum2:
+    masking_value: "((BILLING_PHONE_NUMBER))"
+    regex:
+      - '\(\d{3}\)\s*\d{3}-\d{4}'
+      - '\b\d{3}-\d{3}-\d{4}\b'
+      - '\+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b'
+      - '\b\d{3} \d{3} \d{4}\b'
+  BILLING_FaxNumber:
+    masking_value: "((BILLING_FAX))"
+    regex:
+      - '\(\d{3}\)\s*\d{3}-\d{4}'
+      - '\b\d{3}-\d{3}-\d{4}\b'
+      - '\+\d{1,3}\s\d{1,4}[- ]\d{3}[- ]\d{4}\b'
+      - '\b\d{3} \d{3} \d{4}\b'
+
+combine:
+  patientfullname:
+    masking_value: "((PATIENT_NAME))"
+    combine:
+      - Person_FirstName
+      - Person_MiddleName1
+      - Person_MiddleName2
+      - Person_LastName
+
+replace_value:
+  - old_value: "MIND"
+    new_value: "((FACILITY_NAME))"
+  - old_value: "M.I.N.D."
+    new_value: "((FACILITY_NAME))"
+  - old_value: "M.I.N.D"
+    new_value: "((FACILITY_NAME))"
+  - old_value: "Michigan"
+    new_value: "((FACILITY_NAME))"
+  - old_value: "MICHIGAN INSTITUTE"
+    new_value: "((FACILITY_NAME))"
+  - old_value: "Michigan Institute for Neurological Disorders"
+    new_value: "((FACILITY_NAME))"
+  - old_value: "Orchard Lake"
+    new_value: "((FACILITY_ADDRESS))"
+  - old_value: "Kelly Rd Roseville"
+    new_value: "((FACILITY_ADDRESS))"
+  - old_value: "King Road Riverview"
+    new_value: "((FACILITY_ADDRESS))"
+  - old_value: "Ford Rd"
+    new_value: "((FACILITY_ADDRESS))"
+  - old_value: "Farmington Hills"
+    new_value: "((FACILITY_ADDRESS))"
+  - old_value: "mindonline.com"
+    new_value: "((FACILITY_SITE))"
