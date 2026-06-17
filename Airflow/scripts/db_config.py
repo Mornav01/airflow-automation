@@ -39,6 +39,7 @@ MASTER_INSURANCE_SQL_FILE = os.environ["MASTER_INSURANCE_SQL_FILE"]
 
 # ── Deid config ──────────────────────────────────────────────────
 DBDETAILSMODEL_NAME = os.environ["DBDETAILSMODEL_NAME"]
+PROJECT_NAME = os.environ["PROJECT_NAME"]
 
 # ── Tables CSV (per DAG) ─────────────────────────────────────────
 DIFF_MERGE_TABLES_CSV        = os.environ["DIFF_MERGE_TABLES_CSV"]

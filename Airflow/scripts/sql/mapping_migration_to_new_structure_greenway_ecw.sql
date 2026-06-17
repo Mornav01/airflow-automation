@@ -125,3 +125,6 @@ SELECT
 FROM mapping_pg.encounter_mapping_table e
 JOIN mapping_pg.patient_mapping_table   p ON e.nd_patient_id = p.nd_patient_id
 LIMIT 10;
+
+
+CREATE DATABASE IF NOT EXISTS master_pg;
