@@ -8,12 +8,16 @@ Follow these steps in order for each new project. Use an existing project (e.g. 
 
 ```bash
 # Airflow automation repo
+git clone -b arizona_automation https://github.com/neurodiscoveryai/airflow-automation.git
+# or if already cloned:
 cd /path/to/airflow-automation
-git pull origin <branch>
+git fetch origin && git checkout arizona_automation && git pull origin arizona_automation
 
 # Deidentification repo
+git clone -b chartid_deid_reworked https://github.com/neurodiscoveryai/deidentification_v2.git
+# or if already cloned:
 cd /path/to/deidentification_v2
-git pull origin <branch>
+git fetch origin && git checkout chartid_deid_reworked && git pull origin chartid_deid_reworked
 ```
 
 ---
