@@ -35,7 +35,7 @@ USE mapping_pg;
 
 CREATE TABLE IF NOT EXISTS patient_mapping_table (
   nd_patient_id     BIGINT   NOT NULL,
-  patientid         BIGINT   NOT NULL,
+  patientid         varchar(64)   NOT NULL,
   profileid         BIGINT   NOT NULL,
   pid               BIGINT   NOT NULL,
   `offset`          INT      NOT NULL,
@@ -79,7 +79,7 @@ INSERT INTO mapping_pg.patient_mapping_table
   (nd_patient_id, patientid, profileid, pid, `offset`, registration_date, created_at, updated_at)
 SELECT
   nd_patient_id,
-  CAST(patientid  AS SIGNED),
+  patientid,
   CAST(profileid  AS SIGNED),
   CAST(pid        AS SIGNED),
   `offset`,
