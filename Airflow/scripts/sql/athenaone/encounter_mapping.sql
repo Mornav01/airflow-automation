@@ -1,0 +1,6 @@
+SELECT
+    e.CLINICALENCOUNTERID AS encounter_id,
+    e.PATIENTID           AS patientid,
+    e.ENCOUNTERDATE       AS encounter_date
+FROM CLINICALENCOUNTER e
+ORDER BY e.ENCOUNTERDATE;
