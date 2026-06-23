@@ -1,0 +1,37 @@
+# V3 mapping config for <project>.
+# source_type: 'mssql' or 'mysql'
+source_type: mssql
+
+patient:
+  sql_file: /Users/neurodiscoveryai/Desktop/AIR_DEID_V2/airflow-automation/Airflow/scripts/sql/ecw/patient_mapping.sql
+  identifier_columns:
+    - patientid
+  # nd_patient_id starts at this value when the mapping table is empty.
+  # Must be unique across all projects — coordinate with team to avoid collision.
+  base_nd_id: 100100040000001
+
+child_tables:
+
+  - name: encounter
+    sql_file: /Users/neurodiscoveryai/Desktop/AIR_DEID_V2/airflow-automation/Airflow/scripts/sql/ecw/encounter_mapping.sql
+    patient_ref_cols:
+      - patientid       # column(s) in encounter SQL that link back to a patient identifier
+    source_id_col: encounter_id
+    date_col: encounter_date
+    nd_id_suffix_len: 4
+    mapping_table: encounter_mapping_table
+    nd_id_col: nd_encounter_id
+
+master_tables:
+
+  - name: pii_data
+    sql_file: /Users/neurodiscoveryai/Desktop/AIR_DEID_V2/airflow-automation/Airflow/scripts/sql/ecw/master_pii_data.sql
+    join_cols:
+      - patientid       # must be in patient.identifier_columns
+    target_table: pii_data_table
+
+  - name: master_insurance
+    sql_file: /Users/neurodiscoveryai/Desktop/AIR_DEID_V2/airflow-automation/Airflow/scripts/sql/ecw/master_insurance_data.sql
+    join_cols:
+      - patientid
+    target_table: master_insurance_table
