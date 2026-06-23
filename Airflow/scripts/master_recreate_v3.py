@@ -243,7 +243,7 @@ def main():
     args = parser.parse_args()
 
     sys.path.insert(0, os.path.dirname(__file__))
-    from incremental_mapping_update_v3 import load_config
+    from incremental_mapping_update_v5 import load_config
     config = load_config(args.config)
 
     from db_config import (

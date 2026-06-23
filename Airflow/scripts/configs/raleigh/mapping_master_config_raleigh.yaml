@@ -1,0 +1,62 @@
+# V3 mapping + master config for the Noran project.
+# Used by both mssql_incremental_mapping_update_v3.py and master_recreate_v3.py.
+# Point sql_file paths to absolute paths on the Airflow worker.
+
+# source_type: 'mssql' or 'mysql'. Omit to default to 'mssql'.
+source_type: mysql
+
+patient:
+  sql_file: /Users/neurodiscoveryai/Desktop/athenaone_airflow_automation/services/sql/athenaone/patient_mapping.sql
+  # All identifier_columns must be 1:1 with each other (validated at runtime).
+  identifier_columns:
+    - patientid
+    - enterpriseid
+  # nd_patient_id starts at this value when the mapping table is empty.
+  base_nd_id: 100100100000001
+
+child_tables:
+
+  - name: encounter
+    sql_file: /Users/neurodiscoveryai/Desktop/athenaone_airflow_automation/services/sql/athenaone/encounter_mapping.sql
+    # patient_ref_cols: columns returned by the child SQL that link to a patient.
+    # Tried in order — first non-null match wins.
+    patient_ref_cols:
+      - patientid
+    source_id_col: encounter_id      # source system's encounter identifier column alias
+    date_col: encounter_date          # date column alias in the child SQL
+    nd_id_suffix_len: 4               # nd_encounter_id = {nd_patient_id}0001, 0002, ...
+    mapping_table: encounter_mapping_table
+    nd_id_col: nd_encounter_id
+
+  - name: chart
+    sql_file: /Users/neurodiscoveryai/Desktop/athenaone_airflow_automation/services/sql/athenaone/chart_mapping.sql
+    patient_ref_cols:
+      - enterpriseid
+    source_id_col: chart_id
+    date_col: chart_date
+    nd_id_suffix_len: 5               # nd_chart_id = {nd_patient_id}00001, 00002, ...
+    mapping_table: chart_mapping_table
+    nd_id_col: nd_chart_id
+    # use_len_guard: treat any existing nd_chart_id whose digit count is ≤ 15
+    # (i.e. equal to nd_patient_id alone) as uninitialised and restart from base.
+    use_len_guard: true
+  
+
+master_tables:
+
+  - name: pii_data
+    # SQL must return at least one column listed in join_cols.
+    sql_file: /Users/neurodiscoveryai/Desktop/athenaone_airflow_automation/services/sql/athenaone/master_pii_data.sql
+    # Columns used to join source data to patient_mapping_table.
+    # Tried in order per row — first non-null match wins (NOT a multi-column AND join).
+    # Each entry must be in patient.identifier_columns.
+    join_cols:
+      - patientid
+    # Destination MySQL table. Existing table is rotated to {target_table}_old before write.
+    target_table: pii_data_table
+
+  - name: master_insurance
+    sql_file: /Users/neurodiscoveryai/Desktop/athenaone_airflow_automation/services/sql/athenaone/master_insurance_data.sql
+    join_cols:
+      - patientid
+    target_table: master_insurance_table

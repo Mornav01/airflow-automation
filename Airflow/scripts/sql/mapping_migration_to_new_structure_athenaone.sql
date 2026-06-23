@@ -7,7 +7,8 @@
 --   patient_mapping_table:
 --     - Deduplicated by patientid (keep row with lowest nd_patient_id per patientid)
 --     - nd_patient_id: plain BIGINT, unique via PK
---     - patientid: gets its own UNIQUE KEY
+--     - patientid: BIGINT (was VARCHAR(64) in mapping_prod), gets its own UNIQUE KEY
+--     - enterpriseid: BIGINT NOT NULL, same value as patientid, with UNIQUE KEY
 --     - chartid: REMOVED from this table, moved to chart_mapping_table
 --     - Dropped: created_by, updated_by
 --     - TIMESTAMP → DATETIME
@@ -56,14 +57,17 @@ USE mapping_pg;
 
 CREATE TABLE IF NOT EXISTS patient_mapping_table (
   nd_patient_id     BIGINT       NOT NULL,
-  patientid         VARCHAR(64)  NOT NULL,
+  patientid         BIGINT       NOT NULL,
+  enterpriseid      BIGINT       NOT NULL,
   `offset`          INT          NOT NULL,
   registration_date DATETIME     DEFAULT NULL,
   created_at        DATETIME     NOT NULL,
   updated_at        DATETIME     NOT NULL,
   PRIMARY KEY (nd_patient_id),
-  UNIQUE KEY uq_patientid (patientid),
-  INDEX idx_patientid (patientid)
+  UNIQUE KEY uq_patientid    (patientid),
+  UNIQUE KEY uq_enterpriseid (enterpriseid),
+  INDEX idx_patientid    (patientid),
+  INDEX idx_enterpriseid (enterpriseid)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 
@@ -80,7 +84,7 @@ CREATE TABLE IF NOT EXISTS chart_mapping_table (
   nd_ActiveFlag   CHAR(1)  NOT NULL DEFAULT 'Y',
   created_at      DATETIME NOT NULL,
   updated_at      DATETIME NOT NULL,
-  patientid       BIGINT   NOT NULL,
+  enterpriseid    BIGINT   NOT NULL,
   PRIMARY KEY (id),
   UNIQUE KEY uq_nd_chart_id   (nd_chart_id),
   INDEX idx_nd_patient_id     (nd_patient_id),
@@ -117,10 +121,11 @@ CREATE TABLE IF NOT EXISTS encounter_mapping_table (
 -- =============================================================================
 
 INSERT INTO mapping_pg.patient_mapping_table
-  (nd_patient_id, patientid, `offset`, registration_date, created_at, updated_at)
+  (nd_patient_id, patientid, enterpriseid, `offset`, registration_date, created_at, updated_at)
 SELECT
   nd_patient_id,
-  patientid,
+  CAST(patientid AS SIGNED),
+  CAST(patientid AS SIGNED),
   `offset`,
   registration_date,
   created_at,
@@ -149,18 +154,18 @@ WHERE x._rn = 1;
 -- =============================================================================
 
 INSERT INTO mapping_pg.chart_mapping_table
-  (nd_patient_id, chart_id, nd_chart_id, chart_date, nd_ActiveFlag, created_at, updated_at, patientid)
+  (nd_patient_id, chart_id, nd_chart_id, chart_date, nd_ActiveFlag, created_at, updated_at, enterpriseid)
 SELECT
   new_p.nd_patient_id,
-  CAST(old_p.chartid        AS SIGNED) AS chart_id,
-  old_p.nd_patient_id                  AS nd_chart_id,
-  old_p.registration_date              AS chart_date,
+  CAST(old_p.chartid    AS SIGNED) AS chart_id,
+  old_p.nd_patient_id              AS nd_chart_id,
+  old_p.registration_date          AS chart_date,
   'Y',
   old_p.created_at,
   old_p.updated_at,
-  CAST(new_p.patientid      AS SIGNED)
+  new_p.enterpriseid
 FROM mapping_prod.patient_mapping_table old_p
-JOIN mapping_pg.patient_mapping_table   new_p ON old_p.patientid = new_p.patientid;
+JOIN mapping_pg.patient_mapping_table   new_p ON CAST(old_p.patientid AS SIGNED) = new_p.patientid;
 
 
 -- =============================================================================
@@ -180,10 +185,10 @@ SELECT
   'Y',
   e.created_at,
   e.updated_at,
-  CAST(new_p.patientid   AS SIGNED)
+  new_p.patientid
 FROM mapping_prod.encounter_mapping_table e
 JOIN mapping_prod.patient_mapping_table   old_p ON e.nd_patient_id = old_p.nd_patient_id
-JOIN mapping_pg.patient_mapping_table     new_p ON old_p.patientid = new_p.patientid;
+JOIN mapping_pg.patient_mapping_table     new_p ON CAST(old_p.patientid AS SIGNED) = new_p.patientid;
 
 
 -- =============================================================================
@@ -285,7 +290,6 @@ WHERE NOT EXISTS (
 -- Step 1: all chartids and their nd_patient_ids in mapping_prod for this patientid
 SELECT patientid, chartid, nd_patient_id, registration_date
 FROM mapping_prod.patient_mapping_table
-WHERE patientid = 31351
 ORDER BY chartid;
 
 -- Step 2: chart_mapping_table rows for those chartids (verify consolidation)
@@ -294,7 +298,6 @@ FROM mapping_pg.chart_mapping_table c
 WHERE c.chart_id IN (
   SELECT CAST(chartid AS SIGNED)
   FROM mapping_prod.patient_mapping_table
-  WHERE patientid = 31351
 )
 ORDER BY c.chart_id;
 
@@ -302,7 +305,6 @@ ORDER BY c.chart_id;
 SELECT e.nd_patient_id, e.encounter_id, e.nd_encounter_id, e.encounter_date, e.nd_ActiveFlag
 FROM mapping_pg.encounter_mapping_table e
 JOIN mapping_pg.patient_mapping_table   p ON e.nd_patient_id = p.nd_patient_id
-WHERE p.patientid = 31351
 ORDER BY e.encounter_id;
 
 
