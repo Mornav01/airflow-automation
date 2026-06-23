@@ -15,8 +15,9 @@
 --     - id INT → BIGINT AUTO_INCREMENT
 --     - encounter_id, nd_encounter_id: cast to BIGINT via CAST
 --     - encounter_date: nullable DATETIME
---     - Dropped: created_by, updated_by
+--     - Dropped: created_by, updated_by, patientid, pid
 --     - TIMESTAMP → DATETIME
+--     - Added: profileid BIGINT NOT NULL
 -- =============================================================================
 
 -- =============================================================================
@@ -64,9 +65,7 @@ CREATE TABLE IF NOT EXISTS encounter_mapping_table (
   nd_ActiveFlag   CHAR(1)     NOT NULL DEFAULT 'Y',
   created_at      DATETIME    NOT NULL,
   updated_at      DATETIME    NOT NULL,
-  patientid       VARCHAR(64) NOT NULL,
   profileid       BIGINT      NOT NULL,
-  pid             BIGINT      NOT NULL,
   PRIMARY KEY (id),
   UNIQUE KEY uq_nd_encounter_id (nd_encounter_id),
   INDEX idx_nd_patient_id (nd_patient_id),
@@ -95,13 +94,13 @@ FROM mapping_prod.patient_mapping_table;
 -- =============================================================================
 -- SECTION 5: Migrate encounter data
 --   - nd_patient_id already present in source
---   - JOIN patient table to carry patientid, profileid, pid into encounter rows
+--   - JOIN patient table to carry profileid into encounter rows
 --   - Drop: created_by, updated_by
 -- =============================================================================
 
 INSERT INTO mapping_pg.encounter_mapping_table
   (nd_patient_id, encounter_id, nd_encounter_id, encounter_date, nd_ActiveFlag, created_at, updated_at,
-   patientid, profileid, pid)
+   profileid)
 SELECT
   e.nd_patient_id,
   CAST(e.encounter_id    AS SIGNED),
@@ -110,9 +109,7 @@ SELECT
   e.nd_ActiveFlag,
   e.created_at,
   e.updated_at,
-  p.patientid,
-  CAST(p.profileid       AS SIGNED),
-  CAST(p.pid             AS SIGNED)
+  CAST(p.profileid       AS SIGNED)
 FROM mapping_prod.encounter_mapping_table e
 JOIN mapping_prod.patient_mapping_table   p ON e.nd_patient_id = p.nd_patient_id;
 
@@ -135,11 +132,8 @@ SELECT
   e.nd_patient_id,
   e.encounter_id,
   e.nd_encounter_id,
-  p.patientid,
-  p.profileid,
-  p.pid
+  e.profileid
 FROM mapping_pg.encounter_mapping_table e
-JOIN mapping_pg.patient_mapping_table   p ON e.nd_patient_id = p.nd_patient_id
 LIMIT 10;
 
 
