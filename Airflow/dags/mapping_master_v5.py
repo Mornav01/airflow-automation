@@ -29,7 +29,7 @@ MASTER_SCRIPT = os.path.abspath(
 
 STATE_BASE         = os.path.join(os.environ["STATE_DIR"], "mapping_master_v5")
 MAPPING_STATE_FILE = os.path.join(STATE_BASE, "v5_mapping_update_state.json")
-MASTER_STATE_FILE  = os.path.join(STATE_BASE, "v5_master_state.json")
+MASTER_STATE_FILE  = os.path.join(os.environ["STATE_DIR"], "mapping_master_v3", "v3_master_state.json")
 
 default_args = {
     "owner": "airflow",
