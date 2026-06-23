@@ -60,7 +60,9 @@ CREATE TABLE IF NOT EXISTS encounter_mapping_table (
   nd_ActiveFlag   CHAR(1)  NOT NULL DEFAULT 'Y',
   created_at      DATETIME NOT NULL,
   updated_at      DATETIME NOT NULL,
+  patientid       BIGINT   NOT NULL,
   PRIMARY KEY (id),
+  UNIQUE KEY uq_nd_encounter_id (nd_encounter_id),
   INDEX idx_nd_patient_id (nd_patient_id),
   INDEX idx_source_id (encounter_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
@@ -90,7 +92,7 @@ FROM mapping.patient_mapping_table;
 -- =============================================================================
 
 INSERT INTO mapping_pg.encounter_mapping_table
-  (nd_patient_id, encounter_id, nd_encounter_id, encounter_date, nd_ActiveFlag, created_at, updated_at)
+  (nd_patient_id, encounter_id, nd_encounter_id, encounter_date, nd_ActiveFlag, created_at, updated_at, patientid)
 SELECT
   p.nd_patient_id,
   CAST(e.encounter_id    AS SIGNED),
@@ -98,7 +100,8 @@ SELECT
   e.encounter_date,
   e.nd_ActiveFlag,
   e.created_at,
-  e.updated_at
+  e.updated_at,
+  CAST(e.patient_id      AS SIGNED)
 FROM mapping.encounter_mapping_table e
 JOIN mapping.patient_mapping_table   p ON e.patient_id = p.patient_id;
 

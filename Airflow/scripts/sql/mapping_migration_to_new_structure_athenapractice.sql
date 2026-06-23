@@ -56,15 +56,19 @@ CREATE TABLE IF NOT EXISTS patient_mapping_table (
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS encounter_mapping_table (
-  id              BIGINT   NOT NULL AUTO_INCREMENT,
-  nd_patient_id   BIGINT   NOT NULL,
-  encounter_id    BIGINT   NOT NULL,
-  nd_encounter_id BIGINT   NOT NULL,
-  encounter_date  DATETIME DEFAULT NULL,
-  nd_ActiveFlag   CHAR(1)  NOT NULL DEFAULT 'Y',
-  created_at      DATETIME NOT NULL,
-  updated_at      DATETIME NOT NULL,
+  id              BIGINT      NOT NULL AUTO_INCREMENT,
+  nd_patient_id   BIGINT      NOT NULL,
+  encounter_id    BIGINT      NOT NULL,
+  nd_encounter_id BIGINT      NOT NULL,
+  encounter_date  DATETIME    DEFAULT NULL,
+  nd_ActiveFlag   CHAR(1)     NOT NULL DEFAULT 'Y',
+  created_at      DATETIME    NOT NULL,
+  updated_at      DATETIME    NOT NULL,
+  patientid       VARCHAR(64) NOT NULL,
+  profileid       BIGINT      NOT NULL,
+  pid             BIGINT      NOT NULL,
   PRIMARY KEY (id),
+  UNIQUE KEY uq_nd_encounter_id (nd_encounter_id),
   INDEX idx_nd_patient_id (nd_patient_id),
   INDEX idx_source_id     (encounter_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
@@ -90,21 +94,27 @@ FROM mapping_prod.patient_mapping_table;
 
 -- =============================================================================
 -- SECTION 5: Migrate encounter data
---   - nd_patient_id already present in source — no JOIN required
+--   - nd_patient_id already present in source
+--   - JOIN patient table to carry patientid, profileid, pid into encounter rows
 --   - Drop: created_by, updated_by
 -- =============================================================================
 
 INSERT INTO mapping_pg.encounter_mapping_table
-  (nd_patient_id, encounter_id, nd_encounter_id, encounter_date, nd_ActiveFlag, created_at, updated_at)
+  (nd_patient_id, encounter_id, nd_encounter_id, encounter_date, nd_ActiveFlag, created_at, updated_at,
+   patientid, profileid, pid)
 SELECT
-  nd_patient_id,
-  CAST(encounter_id    AS SIGNED),
-  CAST(nd_encounter_id AS SIGNED),
-  encounter_date,
-  nd_ActiveFlag,
-  created_at,
-  updated_at
-FROM mapping_prod.encounter_mapping_table;
+  e.nd_patient_id,
+  CAST(e.encounter_id    AS SIGNED),
+  CAST(e.nd_encounter_id AS SIGNED),
+  e.encounter_date,
+  e.nd_ActiveFlag,
+  e.created_at,
+  e.updated_at,
+  p.patientid,
+  CAST(p.profileid       AS SIGNED),
+  CAST(p.pid             AS SIGNED)
+FROM mapping_prod.encounter_mapping_table e
+JOIN mapping_prod.patient_mapping_table   p ON e.nd_patient_id = p.nd_patient_id;
 
 -- =============================================================================
 -- SECTION 6: Verification queries

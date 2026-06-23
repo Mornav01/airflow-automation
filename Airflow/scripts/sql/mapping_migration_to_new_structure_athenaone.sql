@@ -80,9 +80,11 @@ CREATE TABLE IF NOT EXISTS chart_mapping_table (
   nd_ActiveFlag   CHAR(1)  NOT NULL DEFAULT 'Y',
   created_at      DATETIME NOT NULL,
   updated_at      DATETIME NOT NULL,
+  patientid       BIGINT   NOT NULL,
   PRIMARY KEY (id),
-  INDEX idx_nd_patient_id (nd_patient_id),
-  INDEX idx_chart_id      (chart_id)
+  UNIQUE KEY uq_nd_chart_id   (nd_chart_id),
+  INDEX idx_nd_patient_id     (nd_patient_id),
+  INDEX idx_chart_id          (chart_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 
@@ -99,9 +101,11 @@ CREATE TABLE IF NOT EXISTS encounter_mapping_table (
   nd_ActiveFlag   CHAR(1)  NOT NULL DEFAULT 'Y',
   created_at      DATETIME NOT NULL,
   updated_at      DATETIME NOT NULL,
+  patientid       BIGINT   NOT NULL,
   PRIMARY KEY (id),
-  INDEX idx_nd_patient_id (nd_patient_id),
-  INDEX idx_encounter_id  (encounter_id)
+  UNIQUE KEY uq_nd_encounter_id (nd_encounter_id),
+  INDEX idx_nd_patient_id       (nd_patient_id),
+  INDEX idx_encounter_id        (encounter_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 
@@ -145,7 +149,7 @@ WHERE x._rn = 1;
 -- =============================================================================
 
 INSERT INTO mapping_pg.chart_mapping_table
-  (nd_patient_id, chart_id, nd_chart_id, chart_date, nd_ActiveFlag, created_at, updated_at)
+  (nd_patient_id, chart_id, nd_chart_id, chart_date, nd_ActiveFlag, created_at, updated_at, patientid)
 SELECT
   new_p.nd_patient_id,
   CAST(old_p.chartid        AS SIGNED) AS chart_id,
@@ -153,7 +157,8 @@ SELECT
   old_p.registration_date              AS chart_date,
   'Y',
   old_p.created_at,
-  old_p.updated_at
+  old_p.updated_at,
+  CAST(new_p.patientid      AS SIGNED)
 FROM mapping_prod.patient_mapping_table old_p
 JOIN mapping_pg.patient_mapping_table   new_p ON old_p.patientid = new_p.patientid;
 
@@ -166,7 +171,7 @@ JOIN mapping_pg.patient_mapping_table   new_p ON old_p.patientid = new_p.patient
 -- =============================================================================
 
 INSERT INTO mapping_pg.encounter_mapping_table
-  (nd_patient_id, encounter_id, nd_encounter_id, encounter_date, nd_ActiveFlag, created_at, updated_at)
+  (nd_patient_id, encounter_id, nd_encounter_id, encounter_date, nd_ActiveFlag, created_at, updated_at, patientid)
 SELECT
   new_p.nd_patient_id,
   CAST(e.encounter_id    AS SIGNED),
@@ -174,7 +179,8 @@ SELECT
   e.encounter_date,
   'Y',
   e.created_at,
-  e.updated_at
+  e.updated_at,
+  CAST(new_p.patientid   AS SIGNED)
 FROM mapping_prod.encounter_mapping_table e
 JOIN mapping_prod.patient_mapping_table   old_p ON e.nd_patient_id = old_p.nd_patient_id
 JOIN mapping_pg.patient_mapping_table     new_p ON old_p.patientid = new_p.patientid;

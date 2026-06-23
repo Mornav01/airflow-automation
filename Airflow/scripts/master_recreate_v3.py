@@ -248,9 +248,9 @@ def main():
 
     from db_config import (
         STATE_DIR,
-        V3_MASTER_SOURCE_CONN_STR,
-        V3_MASTER_MYSQL_CONN_STR,
-        V3_MASTER_MAPPING_CONN_STR,
+        MASTER_SOURCE_CONN_STR,
+        MASTER_DEST_CONN_STR,
+        MASTER_MAPPING_CONN_STR,
     )
 
     state_dir = os.path.join(STATE_DIR, "mapping_master_v3")
@@ -276,9 +276,9 @@ def main():
     try:
         results = run_master_etl(
             config,
-            V3_MASTER_SOURCE_CONN_STR,
-            V3_MASTER_MYSQL_CONN_STR,
-            V3_MASTER_MAPPING_CONN_STR,
+            MASTER_SOURCE_CONN_STR,
+            MASTER_DEST_CONN_STR,
+            MASTER_MAPPING_CONN_STR,
             args.dry_run,
         )
         for name, result in results.items():

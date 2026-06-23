@@ -881,7 +881,7 @@ def main():
 
     config = load_config(args.config)
 
-    from db_config import STATE_DIR, V3_MAPPING_SOURCE_CONN, V3_MAPPING_MYSQL_CONN
+    from db_config import STATE_DIR, MAPPING_SOURCE_CONN, MAPPING_DEST_CONN
 
     state_dir = os.path.join(STATE_DIR, "mapping_master_v3")
     setup_logging(state_dir)
@@ -897,7 +897,7 @@ def main():
     logging.info("Starting V4 Mapping Update ETL")
 
     try:
-        result = run_etl(config, V3_MAPPING_SOURCE_CONN, V3_MAPPING_MYSQL_CONN, args.dry_run)
+        result = run_etl(config, MAPPING_SOURCE_CONN, MAPPING_DEST_CONN, args.dry_run)
         state  = {"last_processed_date": today, **result}
         state_manager.save(state)
         logging.info(f"V4 Mapping Update completed: {result}")

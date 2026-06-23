@@ -21,7 +21,7 @@ from db_config import V3_MAPPING_CONFIG_FILE  # noqa: E402
 PYTHON_EXECUTABLE = os.environ.get("AIRFLOW_PYTHON", "python")
 
 MAPPING_SCRIPT = os.path.abspath(
-    os.path.join(SCRIPT_DIR, "..", "scripts", "incremental_mapping_update_v4.py")
+    os.path.join(SCRIPT_DIR, "..", "scripts", "incremental_mapping_update_v5.py")
 )
 MASTER_SCRIPT = os.path.abspath(
     os.path.join(SCRIPT_DIR, "..", "scripts", "master_recreate_v3.py")
