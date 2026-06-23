@@ -21,7 +21,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.abspath(os.path.join(SCRIPT_DIR, "..", "scripts")))
 
 from db_config import (  # noqa: E402  # type: ignore[import-untyped]
-    V3_MAPPING_CONFIG_FILE,
+    MAPPING_CONFIG_FILE,
     DEID_TABLES_CSV,
     PROJECT_NAME,
 )
@@ -29,18 +29,16 @@ from db_config import (  # noqa: E402  # type: ignore[import-untyped]
 PYTHON_EXECUTABLE = os.environ.get("AIRFLOW_PYTHON", "python")
 DEID_PYTHON       = os.environ.get("DEID_PYTHON", PYTHON_EXECUTABLE)
 
-# V3 mapping scripts
 MAPPING_SCRIPT = os.path.abspath(
-    os.path.join(SCRIPT_DIR, "..", "scripts", "incremental_mapping_update_v3.py")
+    os.path.join(SCRIPT_DIR, "..", "scripts", "incremental_mapping_update_v5.py")
 )
 MASTER_SCRIPT = os.path.abspath(
     os.path.join(SCRIPT_DIR, "..", "scripts", "master_recreate_v3.py")
 )
 
-# V3 state files
-STATE_BASE         = os.path.join(os.environ["STATE_DIR"], "mapping_master_v3")
-MAPPING_STATE_FILE = os.path.join(STATE_BASE, "v3_mapping_update_state.json")
-MASTER_STATE_FILE  = os.path.join(STATE_BASE, "v3_master_state.json")
+STATE_BASE         = os.path.join(os.environ["STATE_DIR"], "mapping_master_v5")
+MAPPING_STATE_FILE = os.path.join(STATE_BASE, "v5_mapping_update_state.json")
+MASTER_STATE_FILE  = os.path.join(STATE_BASE, "v5_master_state.json")
 
 # Deid config
 _CONFIGS_DIR    = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "scripts", "configs"))
@@ -58,15 +56,15 @@ default_args = {
 
 with DAG(
     dag_id="deidentification_runner_v4",
-    description="V3 Mapping Master → Deidentification Runner (deid pg)",
+    description="V5 Mapping Master → Deidentification Runner (deid pg)",
     schedule=None,
     start_date=pendulum.datetime(2026, 2, 1, tz=local_tz),
     catchup=False,
     default_args=default_args,
-    tags=["deid", "mapping", "v3", "v4"],
+    tags=["deid", "mapping", "v5", "v4"],
     params={
         # V3 Mapping params
-        "config_file": V3_MAPPING_CONFIG_FILE,
+        "config_file": MAPPING_CONFIG_FILE,
         "dry_run":     False,
         # Deidentification v2 params
         "config_yaml":     _DEFAULT_CONFIG,
@@ -75,7 +73,7 @@ with DAG(
 ) as dag:
 
     # ──────────────────────────────────────────────
-    # 1. Run V3 Mapping + Master Jobs
+    # 1. Run V5 Mapping + Master Jobs
     # ──────────────────────────────────────────────
 
     def run_mapping_jobs(**context):
@@ -110,7 +108,7 @@ with DAG(
     )
 
     # ──────────────────────────────────────────────
-    # 2. Validate V3 Mapping State Files
+    # 2. Validate Mapping State Files
     # ──────────────────────────────────────────────
 
     def validate_mapping_master(**_):
@@ -122,8 +120,8 @@ with DAG(
             return bool(sub_states) and all(v.get("success", False) for v in sub_states)
 
         state_files = {
-            "v3_mapping": MAPPING_STATE_FILE,
-            "v3_master":  MASTER_STATE_FILE,
+            "v5_mapping": MAPPING_STATE_FILE,
+            "master":     MASTER_STATE_FILE,
         }
 
         failed = []

@@ -22,9 +22,12 @@ sys.path.insert(0, os.path.abspath(os.path.join(SCRIPT_DIR, "..", "scripts")))
 
 from db_config import (  # noqa: E402  # type: ignore[import-untyped]
     STATE_DIR,
-    MAPPING_SQL_FILE, MASTER_PII_SQL_FILE, MASTER_INSURANCE_SQL_FILE,
     DEID_TABLES_CSV,
 )
+
+MAPPING_SQL_FILE          = os.environ["MAPPING_SQL_FILE"]
+MASTER_PII_SQL_FILE       = os.environ["MASTER_PII_SQL_FILE"]
+MASTER_INSURANCE_SQL_FILE = os.environ["MASTER_INSURANCE_SQL_FILE"]
 
 PYTHON_EXECUTABLE = os.environ.get("AIRFLOW_PYTHON", "python")
 # deid v2 requires the new_deid conda env (has polars, celery, deid package).
