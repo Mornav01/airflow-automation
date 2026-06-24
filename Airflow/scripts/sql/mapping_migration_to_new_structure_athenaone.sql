@@ -292,8 +292,8 @@ SELECT patientid, chartid, nd_patient_id, registration_date
 FROM mapping_prod.patient_mapping_table
 ORDER BY chartid;
 
--- Step 2: chart_mapping_table rows for those chartids (verify consolidation)
-SELECT c.chart_id, c.nd_chart_id, c.nd_patient_id, c.chart_date, c.nd_ActiveFlag
+-- Step 2: chart_mapping_table rows for those chartids (verify consolidation + enterpriseid)
+SELECT c.chart_id, c.nd_chart_id, c.nd_patient_id, c.chart_date, c.nd_ActiveFlag, c.enterpriseid
 FROM mapping_pg.chart_mapping_table c
 WHERE c.chart_id IN (
   SELECT CAST(chartid AS SIGNED)
@@ -301,8 +301,8 @@ WHERE c.chart_id IN (
 )
 ORDER BY c.chart_id;
 
--- Step 3: encounters in mapping_pg for this patientid (all charts consolidated)
-SELECT e.nd_patient_id, e.encounter_id, e.nd_encounter_id, e.encounter_date, e.nd_ActiveFlag
+-- Step 3: encounters in mapping_pg for this patientid (all charts consolidated + patientid)
+SELECT e.nd_patient_id, e.encounter_id, e.nd_encounter_id, e.encounter_date, e.nd_ActiveFlag, e.patientid
 FROM mapping_pg.encounter_mapping_table e
 JOIN mapping_pg.patient_mapping_table   p ON e.nd_patient_id = p.nd_patient_id
 ORDER BY e.encounter_id;
@@ -311,11 +311,14 @@ ORDER BY e.encounter_id;
 -- ── 8.7 Spot check: full bridge for a sample of patients ─────────────────────
 SELECT
   p.patientid,
+  p.enterpriseid,
   p.nd_patient_id,
   c.chart_id,
   c.nd_chart_id,
+  c.enterpriseid  AS chart_enterpriseid,
   e.encounter_id,
-  e.nd_encounter_id
+  e.nd_encounter_id,
+  e.patientid     AS encounter_patientid
 FROM mapping_pg.patient_mapping_table   p
 JOIN mapping_pg.chart_mapping_table     c ON c.nd_patient_id = p.nd_patient_id
 JOIN mapping_pg.encounter_mapping_table e ON e.nd_patient_id = p.nd_patient_id
