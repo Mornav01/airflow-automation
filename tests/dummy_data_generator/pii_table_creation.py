@@ -1,3 +1,4 @@
+import os
 import mysql.connector
 
 # Function to establish a connection to the MySQL database
@@ -63,16 +64,16 @@ def main():
     # Source database connection details
     source_config = {
         'host': 'localhost',
-        'user': 'root',
-        'password': 'Neuro@123',
+        'user': os.environ.get("DB_USER", ""),
+        'password': os.environ.get("DB_PASS", ""),
         'database': 'ndsource'
     }
 
     # Destination database connection details
     dest_config = {
         'host': 'localhost',
-        'user': 'root',
-        'password': 'Neuro@123',
+        'user': os.environ.get("DB_USER", ""),
+        'password': os.environ.get("DB_PASS", ""),
         'database': 'masterdb'
     }
 

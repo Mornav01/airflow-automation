@@ -1,0 +1,165 @@
+combine:
+  patientfullname:
+    combine:
+      - users_ufname
+      - users_uminitial
+      - users_ulname
+    masking_value: "((PATIENTNAME))"
+    processing_func: null
+    regex: null
+
+dob:
+  users_dob:
+    masking_value: "((PatientDOB))"
+  users_ptDob:
+    masking_value: "((PatientDOB))"
+
+mask:
+  # All entries include min_length: 2 as per your YAML preference
+  users_ssn:
+    masking_value: "((PatientSSN))"
+    min_length: 2
+  users_upwd:
+    masking_value: "((PatientDetail))"
+    min_length: 2
+  users_uname:
+    masking_value: "((PatientDetail))"
+    min_length: 2
+  users_uemail:
+    masking_value: "((PatientEmail))"
+    min_length: 2
+  users_ufname:
+    masking_value: "((PatientName))"
+    min_length: 2
+  users_ulname:
+    masking_value: "((PatientName))"
+    min_length: 2
+  users_upcity:
+    masking_value: "((PatientCity))"
+    min_length: 2
+  patients_GrId:
+    masking_value: "((PatientDetail))"
+    min_length: 2
+  patients_city:
+    masking_value: "((City))"
+    min_length: 2
+  users_upPhone:
+    masking_value: "((PatientPhone))"
+    min_length: 2
+  patients_insId:
+    masking_value: "((InsuranceDetails))"
+    min_length: 2
+  users_initials:
+    masking_value: "((PatientName))"
+    min_length: 2
+  users_upagerno:
+    masking_value: "((PatientPhone))"
+    min_length: 2
+  patients_insId2:
+    masking_value: "((InsuranceDetails))"
+    min_length: 2
+  users_uminitial:
+    masking_value: "((PatientName))"
+    min_length: 2
+  users_umobileno:
+    masking_value: "((PatientPhone))"
+    min_length: 2
+  users_upaddress:
+    masking_value: "((PatientAddress))"
+    min_length: 2
+  patients_insname:
+    masking_value: "((InsuranceDetails))"
+    min_length: 2
+  users_upaddress2:
+    masking_value: "((PatientAddress))"
+    min_length: 2
+  patients_inscopay:
+    masking_value: "((InsuranceDetails))"
+    min_length: 2
+  patients_insname2:
+    masking_value: "((InsuranceDetails))"
+    min_length: 2
+  patients_inscopay2:
+    masking_value: "((InsuranceDetails))"
+    min_length: 2
+  patients_insgroupno:
+    masking_value: "((InsuranceDetails))"
+    min_length: 2
+  patients_straddress:
+    masking_value: "((Address))"
+    min_length: 2
+  users_upreviousname:
+    masking_value: "((PatientName))"
+    min_length: 2
+  patients_insgroupno2:
+    masking_value: "((InsuranceDetails))"
+    min_length: 2
+  patients_strAddress2:
+    masking_value: "((Address))"
+    min_length: 2
+  patients_employercity:
+    masking_value: "((EmployerDetails))"
+    min_length: 2
+  patients_employername:
+    masking_value: "((EmployerName))"
+    min_length: 2
+  patients_employerPhone:
+    masking_value: "((EmployerDetails))"
+    min_length: 2
+  patients_preferred_name:
+    masking_value: "((PatientName))"
+    min_length: 2
+  patients_employeraddress:
+    masking_value: "((EmployerDetails))"
+    min_length: 2
+  patients_inssubscriberno:
+    masking_value: "((InsuranceDetails))"
+    min_length: 2
+  patients_employeraddress2:
+    masking_value: "((EmployerDetails))"
+    min_length: 2
+  patients_inssubscriberno2:
+    masking_value: "((InsuranceDetails))"
+    min_length: 2
+
+regex:
+  users_ssn:
+    masking_value: "((SSN))"
+    regex:
+      - "\\b\\d{3}[- ]\\d{2}[- ]\\d{4}\\b"
+  users_uemail:
+    masking_value: "((EMAIL))"
+    regex:
+      - "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\\b"
+  users_upPhone:
+    masking_value: "((PHONENUMBER))"
+    regex: &phone_regex
+      - "\\(\\d{3}\\)\\s*\\d{3}-\\d{4}"
+      - "\\b\\d{3}-\\d{3}-\\d{4}\\b"
+      - "\\+\\d{1,3}\\s\\d{1,4}[- ]\\d{3}[- ]\\d{4}\\b"
+      - "\\b\\d{3} \\d{3} \\d{4}\\b"
+  users_upagerno:
+    masking_value: "((PHONENUMBER))"
+    regex: *phone_regex
+  users_umobileno:
+    masking_value: "((PHONENUMBER))"
+    regex: *phone_regex
+  patients_employerPhone:
+    masking_value: "((PHONENUMBER))"
+    regex: *phone_regex
+  patients_insgroupno:
+    masking_value: "((PATIENT_INSURANCE))"
+    regex: *phone_regex
+  patients_inssubscriberno:
+    masking_value: "((PATIENT_INSURANCE))"
+    regex: *phone_regex
+  # Complex Address Regex Mapping
+  # users_upaddress:
+  #   masking_value: "((PATIENT_ADDRESS))"
+  #   regex:
+  #     - "(?x) (?:\\d+[A-Za-z]{0,3}\\s+[A-Za-z0-9\\s.,'-]*)|(?:P\\.?\\s*O\\.?\\s*Box\\s+\\d+)[,\\s]+[A-Za-z\\s]+?[,\\s]+AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY[\\s,]*\\d{5}(?:-\\d{4})?"
+
+# Per-client facility redactions — supplied from env as a JSON list of
+# {old_value, new_value} dicts (varies per eCW client). Set REPLACE_VALUE_JSON
+# in Airflow/.env on each machine; an example is in .env.example.
+replace_value: ${REPLACE_VALUE_JSON}

@@ -167,7 +167,7 @@ def _iter_batches(engine, src_table: Table, batch_size: int):
 class ProgressNoteDecryptor:
     """Decrypts the 'summary' column of the progressnotes table using Blowfish."""
 
-    def __init__(self, datakey="qdnmbf@##$"):
+    def __init__(self, datakey=os.environ.get("DEID_DECRYPT_KEY", "")):
         self._datakey = datakey
 
     def get_key(self, key_type, key_date):

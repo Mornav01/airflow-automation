@@ -10,6 +10,7 @@ For each table in the CSV:
 """
 
 import argparse
+import concurrent.futures
 import csv
 import json
 import logging
@@ -111,18 +112,9 @@ def load_pk_map(pk_csv):
 # ===================== MERGE STEP ===========================
 # ============================================================
 
-def run_merge_step(table, pk_cols):
-    from merge_engine import MergeEngine
-
-    engine = MergeEngine(
-        db_type=DB_TYPE,
-        main_conn=DEID_MAIN_CONN,
-        diff_conn=DEID_DIFF_STAGING_CONN,
-        diffmerged_conn=DEID_DIFF_MERGED_CONN,
-    )
-
+def run_merge_step(table, pk_cols, merge_engine):
     try:
-        result = engine.run_table(table=table, pk_cols=pk_cols, default_date=HISTORICAL_DATA_DEFAULT_DATE)
+        result = merge_engine.run_table(table=table, pk_cols=pk_cols, default_date=HISTORICAL_DATA_DEFAULT_DATE)
         logging.info("[%s] merge result: %s", table, result)
         return result
     except Exception as e:
@@ -138,7 +130,7 @@ def run_merge_step(table, pk_cols):
 # ===================== CORE LOGIC ===========================
 # ============================================================
 
-def process_table(table_name, pk_cols, state_manager):
+def process_table(table_name, pk_cols, state_manager, merge_engine):
     state = state_manager.load(table_name)
     deid  = state.get("deidentification", {})
 
@@ -160,7 +152,7 @@ def process_table(table_name, pk_cols, state_manager):
 
     # ── Run merge ─────────────────────────────────────────────
     logging.info("[%s] starting deidentified merge", table_name)
-    result = run_merge_step(table_name, pk_cols)
+    result = run_merge_step(table_name, pk_cols, merge_engine)
 
     if result.get("success"):
         logging.info(
@@ -188,6 +180,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--tables_filepath", required=True)
     parser.add_argument("--pk_csv",          default=PK_CSV)
+    parser.add_argument("--max_workers",     type=int, default=8)
     args = parser.parse_args()
 
     setup_logging(STATE_DIR)
@@ -197,20 +190,40 @@ def main():
     with open(args.tables_filepath, newline="") as f:
         tables = [row[0].strip() for row in csv.reader(f)]
 
-    logging.info("Running deidentified merge for %d tables", len(tables))
+    logging.info("Running deidentified merge for %d tables with max_workers=%d",
+                 len(tables), args.max_workers)
 
     state_manager = StateManager(STATE_DIR)
 
+    from merge_engine import MergeEngine
+    merge_engine = MergeEngine(
+        db_type=DB_TYPE,
+        main_conn=DEID_MAIN_CONN,
+        diff_conn=DEID_DIFF_STAGING_CONN,
+        diffmerged_conn=DEID_DIFF_MERGED_CONN,
+        pool_size=args.max_workers,
+    )
+
     failed_tables = []
-    for table in tables:
+
+    def _process(table):
         if table not in pk_map:
             logging.warning("[%s] no PK found, skipping", table)
-            continue
-        try:
-            process_table(table, pk_map[table], state_manager)
-        except Exception:
-            logging.exception("[%s] unexpected error during merge", table)
-            failed_tables.append(table)
+            return
+        process_table(table, pk_map[table], state_manager, merge_engine)
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=args.max_workers) as executor:
+            futures = {executor.submit(_process, table): table for table in tables}
+            for future in concurrent.futures.as_completed(futures):
+                table = futures[future]
+                try:
+                    future.result()
+                except Exception:
+                    logging.exception("[%s] unexpected error during merge", table)
+                    failed_tables.append(table)
+    finally:
+        merge_engine.dispose()
 
     if failed_tables:
         logging.error("Merge failed for tables: %s", failed_tables)

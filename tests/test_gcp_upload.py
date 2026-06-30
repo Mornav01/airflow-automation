@@ -86,7 +86,7 @@ def upload_to_gcs(file_path, blob_name):
     print(f"Uploaded {file_path} to gs://{CLOUD_BUCKET_NAME}/{blob_name}")
 
 
-conn_str = "mysql+pymysql://root:123456789@localhost:3306/nddenttest_mapping"
+conn_str = f"mysql+pymysql://{os.environ.get('DB_USER','')}:{os.environ.get('DB_PASS','')}@localhost:3306/nddenttest_mapping"
 table_name = "encounter_mapping_table"
 
 take_dump_and_upload_to_cloud(table_name, conn_str)

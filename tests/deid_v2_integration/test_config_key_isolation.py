@@ -28,11 +28,11 @@ import sqlalchemy as sa
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
-STATE_DB   = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/deid_runtime/state.db"
-CONFIG_1   = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/Airflow/scripts/configs/config_historical.yaml"
-CONFIG_2   = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/Airflow/scripts/configs/config_incremental.yaml"
-TABLES_CSV = "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/input/test.csv"
-DEID_PYTHON = "/opt/miniconda3/envs/new_deid/bin/python"
+STATE_DB   = "/Users/ndaidcnd/Desktop/Air_DEID/airflow-automation/deid_runtime/state/state.db"
+CONFIG_1   = "/Users/ndaidcnd/Desktop/Air_DEID/airflow-automation/Airflow/scripts/configs/dent_config_historical.yaml"
+CONFIG_2   = "/Users/ndaidcnd/Desktop/Air_DEID/airflow-automation/Airflow/scripts/configs/dent_config_incremental.yaml"
+TABLES_CSV = "/Users/ndaidcnd/Desktop/Air_DEID/airflow-automation/input/test.csv"
+DEID_PYTHON = "/opt/miniconda3/envs/air_deid/bin/python"
 
 # Fake "failed" table — must NOT be in test.csv so it will never actually run
 FAKE_FAILED_TABLE = "__test_failed_table__"

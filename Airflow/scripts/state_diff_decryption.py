@@ -40,15 +40,16 @@ To add decryption for a new table:
 """
 
 import argparse
+import base64
 import csv
 import json
 import logging
 import os
 import sys
 import traceback
+import zlib
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     Column, MetaData, Table, Text, create_engine, func, insert, select
@@ -194,10 +195,8 @@ def load_pk_map(pk_csv):
 
 class ProgressNoteDecryptor:
 
-    def __init__(self, datakey="qdnmbf@##$"):
-        import base64, re
+    def __init__(self, datakey=os.environ.get("DEID_DECRYPT_KEY", "")):
         self._datakey = datakey
-        self.TAG_RE = re.compile(r'<[^>]+>')
 
     def get_key(self, key_type, key_date):
         local_date = key_date.replace(' ', '_')
@@ -208,7 +207,6 @@ class ProgressNoteDecryptor:
         return bytes(key_val, 'utf-8')
 
     def decrypt_pnote(self, d, p):
-        import base64, zlib, traceback
         from Crypto.Cipher import Blowfish
 
         _key = self.get_key(1, d)

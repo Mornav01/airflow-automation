@@ -1,3 +1,4 @@
+import os
 import mysql.connector
 import random
 import logging
@@ -8,8 +9,8 @@ from datetime import datetime
 MYSQL_CONN = {
     "host": "localhost",
     "database": "mapping_sep",
-    "user": "ndadmin",
-    "password": "ndADMIN@2025"
+    "user": os.environ.get("DB_USER", ""),
+    "password": os.environ.get("DB_PASS", "")
 }
 
 logging.basicConfig(

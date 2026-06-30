@@ -1,5 +1,6 @@
 from pathlib import Path
 import subprocess
+import os
 import shutil
 import logging
 from urllib.parse import quote_plus
@@ -12,11 +13,10 @@ from typing import NoReturn
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-SMB_SHARE = "cns-ecw-db01/SQL_Backups"
-SMB_USERNAME = "cns-ecw-db01\\NDAILUSR"
-SMB_PASSWORD = "mMqn_)@=BQCc<?u"
-
-SMB_SOURCE_FOLDER_NAME = "CNS-ECW-DB01/mobiledoc/FULL"
+SMB_SHARE = os.environ.get("SMB_SHARE", "")
+SMB_USERNAME = os.environ.get("SMB_USERNAME", "")
+SMB_PASSWORD = os.environ.get("SMB_PASSWORD", "")
+SMB_SOURCE_FOLDER_NAME = os.environ.get("SMB_SOURCE_FOLDER_NAME", "")
 
 TEMP_MOUNT_POINT = Path("/tmp/data_dump_smb")
 

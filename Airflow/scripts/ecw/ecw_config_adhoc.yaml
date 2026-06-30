@@ -1,0 +1,91 @@
+# ── Source & Destination Databases ──────────────────────────────────
+source_db:
+  type: mysql
+  host: ${DB_HOST}
+  port: ${DB_PORT}
+  database: mobiledoc_apr26_staging
+  username: ${DB_USER}
+  password: ${DB_PASS}
+
+destination_db:
+  type: mysql
+  host: ${DB_HOST}
+  port: ${DB_PORT}
+  database: deidentified_staging
+  username: ${DB_USER}
+  password: ${DB_PASS}
+
+mappings_db:
+  type: mysql
+  host: ${DB_HOST}
+  port: ${DB_PORT}
+  database: ${MAPPING_DB_NAME}
+  username: ${DB_USER}
+  password: ${DB_PASS}
+
+# ── Namespace Key ────────────────────────────────────────────────────
+config_key: adhoc
+
+# ── State Storage ────────────────────────────────────────────────────
+# Using the LOG_DIR variable defined in your .env
+state_db_path: ${LOG_DIR}/state.db
+failed_rows_db_path: ${LOG_DIR}/failed_rows.db
+
+# ── Redis ────────────────────────────────────────────────────────────
+redis_url: redis://${DB_HOST}:6379/0
+
+# ── De-Identification Settings ───────────────────────────────────────
+deidentification:
+  batch_size: 100000
+  date_offset_days: 34
+  patient_id_prefix: 10000000
+  random_seed: 42
+
+# ── Tables & Rules ───────────────────────────────────────────────────
+# Assuming these files live within the main repo structure
+# rules_csv: /Users/ndaidcnd/Desktop/Air_DEID/airflow-automation/Airflow/scripts/configs/documents_ocr.csv
+rules_csv: ${RULES_CSV}
+
+# ── Mapping Tables ───────────────────────────────────────────────────
+mapping_tables:
+  patient:
+    source_column: patient_id
+    destination_column: nd_patient_id
+  encounter:
+    source_column: encounter_id
+    destination_column: nd_encounter_id
+    reference: patient
+
+# ── Pipeline Phases ──────────────────────────────────────────────────
+phases:
+  - setup
+  - deidentify
+
+# ── Worker Settings ──────────────────────────────────────────────────
+workers:
+  fetchers: 2
+  processors: 4
+  max_retries: 1
+  task_timeout: 3600
+
+# ── Logging ──────────────────────────────────────────────────────────
+logging:
+  log_dir: ${LOG_DIR}/adhoc
+
+# ── Quality Control ──────────────────────────────────────────────────
+qc:
+  sample_size: 100
+  scan_for_residual_pii: true
+
+# ── PII / Notes Config ───────────────────────────────────────────────
+# These strings will need to be parsed by your loader to inject the env vars
+pii_db:
+  master_connection_str: "mysql+pymysql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${MASTER_DB_NAME}"
+  secondary_pii_connection_str: "mysql+pymysql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${MASTER_DB_NAME}"
+
+secondary_pii_config_path: ${SECONDARY_PII_YAML}
+
+pii_config_path: ${PII_YAML}
+
+# ── Reference Mapping Joins ───────────────────────────────────────────
+reference_mappings_path: ${REF_MAPPING_YAML}

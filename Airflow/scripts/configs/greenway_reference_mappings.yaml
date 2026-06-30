@@ -17,7 +17,7 @@
 ERXPatMedList:
   source_table: ERXPatMedList
   destination_column: PatientID
-  destination_column_type: PATIENT_PATIENTID
+  destination_column_type: patient_id
   conditions:
     - source_column: ClinicalPatMedID
       reference_table: ClinicalPatMeds
@@ -26,7 +26,7 @@ ERXPatMedList:
 ClinicalDocumentPatHist:
   source_table: ClinicalDocumentPatHist
   destination_column: PatientID
-  destination_column_type: PATIENT_PATIENTID
+  destination_column_type: patient_id
   conditions:
     - source_column: DocumentID
       reference_table: ClinicalDocuments
@@ -35,7 +35,7 @@ ClinicalDocumentPatHist:
 ClinicalBin_Suv_Bio_Epi_decrypt:
   source_table: ClinicalBin_Suv_Bio_Epi_decrypt
   destination_column: PatientID
-  destination_column_type: PATIENT_PATIENTID
+  destination_column_type: patient_id
   conditions:
     - source_column: DocumentID
       reference_table: ClinicalDocuments
@@ -44,7 +44,7 @@ ClinicalBin_Suv_Bio_Epi_decrypt:
 OrdReqDiagnosis:
   source_table: OrdReqDiagnosis
   destination_column: PatientID
-  destination_column_type: PATIENT_PATIENTID
+  destination_column_type: patient_id
   conditions:
     - source_column: OrdReqID
       reference_table: OrdReqClinicalDocuments
@@ -56,7 +56,7 @@ OrdReqDiagnosis:
 OrdReqNote:
   source_table: OrdReqNote
   destination_column: PatientID
-  destination_column_type: PATIENT_PATIENTID
+  destination_column_type: patient_id
   conditions:
     - source_column: OrdReqID
       reference_table: OrdReqClinicalDocuments
@@ -68,7 +68,7 @@ OrdReqNote:
 OBXNote:
   source_table: OBXNote
   destination_column: PatientID
-  destination_column_type: PATIENT_PATIENTID
+  destination_column_type: patient_id
   conditions:
     - source_column: OBXId
       reference_table: OBX
@@ -77,7 +77,7 @@ OBXNote:
 ClinicalPatMedsFillStatus:
   source_table: ClinicalPatMedsFillStatus
   destination_column: PatientID
-  destination_column_type: PATIENT_PATIENTID
+  destination_column_type: patient_id
   conditions:
     - source_column: ClinicalPatMedID
       reference_table: ClinicalPatMeds

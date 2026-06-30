@@ -10,7 +10,7 @@ import pandas as pd
 BATCH_INSERT_CHUNK = 1000
 DEACTIVATE_CHUNK   = 5000
 
-_NULL_LIKE_STRINGS = ["0000-00-00 00:00:00", "0000-00-00", "NaT", "nat", "None"]
+_NULL_LIKE_STRINGS = ["0000-00-00 00:00:00", "0000-00-00", "NaT", "nat", "NaN", "None"]
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -266,16 +266,18 @@ class MergeEngine:
         MSSQL:  mssql+pyodbc://user:pass@host/dbname?driver=ODBC+Driver+17+for+SQL+Server
     """
 
-    def __init__(self, db_type: str, main_conn: str, diff_conn: str, diffmerged_conn: str):
+    def __init__(self, db_type: str, main_conn: str, diff_conn: str, diffmerged_conn: str,
+                 pool_size: int = 8):
         self.db_type = db_type.lower()
         if self.db_type not in ("mysql", "mssql"):
             raise ValueError("db_type must be mysql or mssql")
 
         # fast_executemany is set directly on raw cursors inside helpers —
         # not at engine level. pymysql does not support the engine-level flag.
-        self.main_engine       = create_engine(main_conn,       pool_pre_ping=True, pool_size=5, max_overflow=10)
-        self.diff_engine       = create_engine(diff_conn,       pool_pre_ping=True, pool_size=5, max_overflow=10)
-        self.diffmerged_engine = create_engine(diffmerged_conn, pool_pre_ping=True, pool_size=5, max_overflow=10)
+        _pool_kw = dict(pool_pre_ping=True, pool_size=pool_size, max_overflow=2, pool_recycle=1800)
+        self.main_engine       = create_engine(main_conn,       **_pool_kw)
+        self.diff_engine       = create_engine(diff_conn,       **_pool_kw)
+        self.diffmerged_engine = create_engine(diffmerged_conn, **_pool_kw)
 
         self.main_db       = self._extract_db(main_conn)
         self.diff_db       = self._extract_db(diff_conn)
@@ -285,9 +287,14 @@ class MergeEngine:
         logging.info("DIFF DB = %s", self.diff_db)
         logging.info("DIFFMERGED DB = %s", self.diffmerged_db)
 
+    def dispose(self):
+        self.main_engine.dispose()
+        self.diff_engine.dispose()
+        self.diffmerged_engine.dispose()
+
     # ──────────────────────────────────────────────────────────────────────────
     # PUBLIC ENTRY POINT
-    # ───────────────────────────────────────────────────────���──────────────────
+    # ──────────────────────────────────────────────────────────────────────────
 
     def run_table(self, table: str, pk_cols: List[str], default_date: str) -> Dict:
         """This is the ONLY method Airflow should call."""
@@ -400,7 +407,6 @@ class MergeEngine:
         self._log("Step 4: prepare DIFF table")
         self._ensure_nd_auto_increment_diff(table)
         self._populate_diff_nd_from_main(table, pk_cols)
-        self._ensure_nd_extracted_date_diff(table)       # ← populate nd_extracted_date for incremental rows
         self._ensure_active_flag(self.diff_engine, self.diff_db, table)
         if pk_cols:
             _ensure_active_index(self.diff_engine, self.diff_db, table, pk_cols, self.db_type)
@@ -436,19 +442,10 @@ class MergeEngine:
 
         self._log(f"Step 5: diff_df={len(diff_df)} rows | main active keys={len(main_keys)} rows")
 
-        def norm(series: pd.Series) -> pd.Series:
-            try:
-                numeric = pd.to_numeric(series, errors="coerce")
-                if numeric.notna().all():
-                    return numeric.astype("Int64").astype(str)
-            except Exception:
-                pass
-            return series.astype(str)
-
         def make_key(df: pd.DataFrame) -> pd.Series:
-            result = norm(df[pk_cols[0]])
+            result = df[pk_cols[0]].astype(str)
             for col in pk_cols[1:]:
-                result = result + "||" + norm(df[col])
+                result = result + "||" + df[col].astype(str)
             return result
 
         main_set        = set(make_key(main_keys))
@@ -685,40 +682,6 @@ class MergeEngine:
                 conn.execute(text(f"ALTER TABLE {table} ADD nd_auto_increment_id BIGINT"))
         self._log(f"nd_auto_increment_id added to DIFF.{table}")
 
-    def _ensure_nd_extracted_date_diff(self, table: str):
-        """Ensure nd_extracted_date exists in DIFF table and fill NULLs with today's date.
-
-        Historical rows in MAIN got nd_extracted_date = default_date via _ensure_nd_extracted_date.
-        Incremental rows landing in DIFF never had this column set, so without this step Step 6
-        fills nd_extracted_date=NULL for every incremental row it inserts into MAIN.
-        """
-        from datetime import date as _date
-        today = _date.today().isoformat()
-
-        if not self._column_exists(self.diff_engine, self.diff_db, table, "nd_extracted_date"):
-            self._log(f"Adding nd_extracted_date to DIFF.{table}")
-            with self.diff_engine.begin() as conn:
-                if self.db_type == "mysql":
-                    conn.execute(text(
-                        f"ALTER TABLE `{self.diff_db}`.`{table}` ADD COLUMN nd_extracted_date DATETIME"
-                    ))
-                else:
-                    conn.execute(text(f"ALTER TABLE {table} ADD nd_extracted_date DATETIME"))
-
-        with self.diff_engine.begin() as conn:
-            if self.db_type == "mysql":
-                conn.execute(text(
-                    f"UPDATE `{self.diff_db}`.`{table}` "
-                    f"SET nd_extracted_date = :d "
-                    f"WHERE nd_extracted_date IS NULL"
-                ), {"d": today})
-            else:
-                conn.execute(text(
-                    f"UPDATE {table} SET nd_extracted_date = :d WHERE nd_extracted_date IS NULL"
-                ), {"d": today})
-
-        self._log(f"nd_extracted_date set to {today} for NULL rows in DIFF.{table}")
-
     def _populate_diff_nd_from_main(self, table: str, pk_cols: List[str]):
         # ── check how many NULL nd_auto_increment_id rows exist in DIFF ──
         with self.diff_engine.connect() as conn:
@@ -775,21 +738,16 @@ class MergeEngine:
 
 
     def _ensure_active_flag(self, engine: Engine, db: str, table: str):
-        if not self._column_exists(engine, db, table, "nd_ActiveFlag"):
-            self._log(f"Adding nd_ActiveFlag to {db}.{table}")
-            with engine.begin() as conn:
-                if self.db_type == "mysql":
-                    conn.execute(text(f"ALTER TABLE `{db}`.`{table}` ADD nd_ActiveFlag CHAR(1)"))
-                else:
-                    conn.execute(text(f"ALTER TABLE {table} ADD nd_ActiveFlag CHAR(1)"))
-
-        # Always reset ALL rows to 'Y' before normalization runs — normalization will then
-        # deactivate older duplicates. This ensures no NULLs or stale 'N' values from prior
-        # runs interfere with the normalization logic.
+        if self._column_exists(engine, db, table, "nd_ActiveFlag"):
+            self._log(f"nd_ActiveFlag already exists on {db}.{table} — skipping")
+            return
+        self._log(f"Adding nd_ActiveFlag to {db}.{table}")
         with engine.begin() as conn:
             if self.db_type == "mysql":
+                conn.execute(text(f"ALTER TABLE `{db}`.`{table}` ADD nd_ActiveFlag CHAR(1)"))
                 conn.execute(text(f"UPDATE `{db}`.`{table}` SET nd_ActiveFlag = 'Y'"))
             else:
+                conn.execute(text(f"ALTER TABLE {table} ADD nd_ActiveFlag CHAR(1)"))
                 conn.execute(text(f"UPDATE {table} SET nd_ActiveFlag = 'Y'"))
         self._log(f"nd_ActiveFlag added and set to Y on {db}.{table}")
 

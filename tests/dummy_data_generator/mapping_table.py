@@ -1,10 +1,11 @@
+import os
 import mysql.connector
 import random
 
 # Database connection parameters
 host = "localhost"
-user = "root"
-password = "Neuro@123"
+user = os.environ.get("DB_USER", "")
+password = os.environ.get("DB_PASS", "")
 database = "masterdb"
 
 # Establish the database connection

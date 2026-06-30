@@ -2,11 +2,12 @@ SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-CREATE     PROCEDURE [dbo].[sp_remove_identity_columns_final_updated]
-(
+IF OBJECT_ID('dbo.sp_remove_identity_columns_final_updated', 'P') IS NOT NULL
+    DROP PROCEDURE [dbo].[sp_remove_identity_columns_final_updated]
+GO
+CREATE PROCEDURE [dbo].[sp_remove_identity_columns_final_updated]
     @SchemaName SYSNAME,
-    @TableName SYSNAME
-)
+    @TableName  SYSNAME
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -22,7 +23,7 @@ BEGIN
     DECLARE @fk_sql NVARCHAR(MAX) = '';
 
     SELECT @fk_sql += '
-    ALTER TABLE ' + QUOTENAME(OBJECT_SCHEMA_NAME(fk.parent_object_id)) + '.' 
+    ALTER TABLE ' + QUOTENAME(OBJECT_SCHEMA_NAME(fk.parent_object_id)) + '.'
         + QUOTENAME(OBJECT_NAME(fk.parent_object_id)) +
         ' DROP CONSTRAINT ' + QUOTENAME(fk.name) + ';'
     FROM sys.foreign_keys fk
@@ -34,21 +35,17 @@ BEGIN
         PRINT 'Dropped foreign keys referencing ' + @FullTable;
     END
 
-
-
-
-
     ---------------------------------------------------
     -- Temp tables
     ---------------------------------------------------
     IF OBJECT_ID('tempdb..#identity_cols') IS NOT NULL DROP TABLE #identity_cols;
-    IF OBJECT_ID('tempdb..#indexes') IS NOT NULL DROP TABLE #indexes;
-    IF OBJECT_ID('tempdb..#pk') IS NOT NULL DROP TABLE #pk;
+    IF OBJECT_ID('tempdb..#indexes')       IS NOT NULL DROP TABLE #indexes;
+    IF OBJECT_ID('tempdb..#pk')            IS NOT NULL DROP TABLE #pk;
 
     ---------------------------------------------------
     -- Identity columns
     ---------------------------------------------------
-    SELECT 
+    SELECT
         c.name COLLATE DATABASE_DEFAULT AS column_name,
         t.name COLLATE DATABASE_DEFAULT AS data_type,
         c.max_length,
@@ -64,7 +61,6 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM #identity_cols)
     BEGIN
         PRINT 'No identity columns found on ' + @FullTable;
-        --GOTO SkipIdentityRemoval;
     END
 
     ---------------------------------------------------
@@ -76,41 +72,30 @@ BEGIN
     WHERE kc.type = 'PK'
       AND kc.parent_object_id = OBJECT_ID(@FullTable);
 
-
-
-    
-
     ---------------------------------------------------
-    -- Indexes
+    -- Indexes (drop_sql only)
     ---------------------------------------------------
-    SELECT 
+    SELECT
         'DROP INDEX ' + QUOTENAME(i.name) + ' ON ' + @FullTable AS drop_sql,
-        'CREATE ' +
-        CASE WHEN i.is_unique = 1 THEN 'UNIQUE ' ELSE '' END +
-        i.type_desc + ' INDEX ' +
-        QUOTENAME(i.name) +
-        ' ON ' + @FullTable + '(' +
-        STRING_AGG(
-            CASE WHEN ic.is_included_column = 0 THEN QUOTENAME(c.name COLLATE DATABASE_DEFAULT) ELSE NULL END,
-            ','
-        ) WITHIN GROUP (ORDER BY ic.key_ordinal) + ')' +
-        ISNULL(
-            ' INCLUDE(' +
-            STRING_AGG(
-                CASE WHEN ic.is_included_column = 1 THEN QUOTENAME(c.name COLLATE DATABASE_DEFAULT) ELSE NULL END,
-                ','
-            ) + ')',
-            ''
-        ) AS create_sql,
         i.name AS idx_name
     INTO #indexes
     FROM sys.indexes i
-    JOIN sys.index_columns ic ON i.object_id = ic.object_id AND i.index_id = ic.index_id
-    JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
     WHERE i.object_id = OBJECT_ID(@FullTable)
-    AND i.is_primary_key = 0
-    AND i.type > 0
-    GROUP BY i.name, i.is_unique, i.type_desc;
+      AND i.is_primary_key = 0
+      AND i.type > 0;
+
+    ---------------------------------------------------
+    -- Disable change tracking (required before dropping PK)
+    ---------------------------------------------------
+    IF EXISTS (
+        SELECT 1 FROM sys.change_tracking_tables
+        WHERE object_id = OBJECT_ID(@FullTable)
+    )
+    BEGIN
+        SET @sql = 'ALTER TABLE ' + @FullTable + ' DISABLE CHANGE_TRACKING';
+        EXEC (@sql);
+        PRINT 'Disabled change tracking on ' + @FullTable;
+    END
 
     ---------------------------------------------------
     -- Drop PK
@@ -125,72 +110,53 @@ BEGIN
         PRINT 'Dropped primary key: ' + @pk_name;
     END
 
-
-
     ---------------------------------------------------
     -- Drop UNIQUE constraints
     ---------------------------------------------------
-    DECLARE @uq_name SYSNAME;
+    DECLARE @uq_sql NVARCHAR(MAX) = N'';
 
-    DECLARE cur_uq CURSOR FOR
-    SELECT kc.name
+    SELECT @uq_sql += N'ALTER TABLE ' + @FullTable
+                    + N' DROP CONSTRAINT ' + QUOTENAME(kc.name) + N'; '
     FROM sys.key_constraints kc
     WHERE kc.type = 'UQ'
-    AND kc.parent_object_id = OBJECT_ID(@FullTable);
+      AND kc.parent_object_id = OBJECT_ID(@FullTable);
 
-    OPEN cur_uq;
-    FETCH NEXT FROM cur_uq INTO @uq_name;
-
-    WHILE @@FETCH_STATUS = 0
+    IF @uq_sql <> N''
     BEGIN
-        SET @sql = 'ALTER TABLE ' + @FullTable +
-                ' DROP CONSTRAINT ' + QUOTENAME(@uq_name);
-        EXEC (@sql);
-
-        FETCH NEXT FROM cur_uq INTO @uq_name;
+        EXEC (@uq_sql);
+        PRINT 'Dropped unique constraints on ' + @FullTable;
     END
 
-    CLOSE cur_uq;
-    DEALLOCATE cur_uq;
     ---------------------------------------------------
-    -- Drop indexes safely
+    -- Drop indexes
     ---------------------------------------------------
-    DECLARE cur1 CURSOR FOR SELECT drop_sql, idx_name FROM #indexes;
-    DECLARE @idx_name SYSNAME;
+    DECLARE @idx_drop_sql NVARCHAR(MAX) = N'';
 
-    OPEN cur1;
-    FETCH NEXT FROM cur1 INTO @sql, @idx_name;
+    SELECT @idx_drop_sql += ix.drop_sql + N'; '
+    FROM #indexes ix
+    WHERE EXISTS (
+        SELECT 1 FROM sys.indexes si
+        WHERE si.name = ix.idx_name
+          AND si.object_id = OBJECT_ID(@FullTable)
+    );
 
-    WHILE @@FETCH_STATUS = 0
+    IF @idx_drop_sql <> N''
     BEGIN
-        BEGIN TRY
-            IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = @idx_name AND object_id = OBJECT_ID(@FullTable))
-            BEGIN
-                EXEC (@sql);
-                PRINT 'Dropped index: ' + @idx_name;
-            END
-            ELSE
-            BEGIN
-                PRINT 'Index not found, skipping: ' + @idx_name;
-            END
-        END TRY
-        BEGIN CATCH
-            PRINT 'Error dropping index ' + @idx_name + ': ' + ERROR_MESSAGE();
-        END CATCH
-
-        FETCH NEXT FROM cur1 INTO @sql, @idx_name;
+        EXEC (@idx_drop_sql);
+        PRINT 'Dropped indexes on ' + @FullTable;
     END
 
-    CLOSE cur1; DEALLOCATE cur1;
-
     ---------------------------------------------------
-    -- Drop triggers
+    -- Drop triggers (FOR XML PATH - no STRING_AGG)
     ---------------------------------------------------
-    SELECT @sql = STRING_AGG('DROP TRIGGER ' + QUOTENAME(name COLLATE DATABASE_DEFAULT), ';')
-    FROM sys.triggers
-    WHERE parent_id = OBJECT_ID(@FullTable);
+    SELECT @sql = STUFF(
+        (SELECT ';DROP TRIGGER ' + QUOTENAME(name COLLATE DATABASE_DEFAULT)
+         FROM sys.triggers
+         WHERE parent_id = OBJECT_ID(@FullTable)
+         FOR XML PATH('')),
+        1, 1, '');
 
-    IF @sql IS NOT NULL
+    IF @sql IS NOT NULL AND LEN(@sql) > 0
     BEGIN
         EXEC (@sql);
         PRINT 'Dropped triggers on ' + @FullTable;
@@ -212,7 +178,7 @@ BEGIN
     BEGIN
         DECLARE @newcol SYSNAME = @col + '_ndnew';
         DECLARE @datatype NVARCHAR(100) =
-            CASE 
+            CASE
                 WHEN @type IN ('varchar','char','nvarchar','nchar')
                     THEN @type + '(' + CASE WHEN @len = -1 THEN 'MAX' ELSE CAST(@len AS VARCHAR) END + ')'
                 WHEN @type IN ('decimal','numeric')
@@ -220,26 +186,21 @@ BEGIN
                 ELSE @type
             END;
 
-        -- Add new column
         SET @sql = 'ALTER TABLE ' + @FullTable + ' ADD ' + QUOTENAME(@newcol) + ' ' + @datatype + ' NULL';
         EXEC (@sql);
 
-        -- Copy data
         SET @sql = 'UPDATE ' + @FullTable + ' SET ' + QUOTENAME(@newcol) + ' = ' + QUOTENAME(@col);
         EXEC (@sql);
 
-        -- Enforce NOT NULL if needed
         IF @nullable = 0
         BEGIN
             SET @sql = 'ALTER TABLE ' + @FullTable + ' ALTER COLUMN ' + QUOTENAME(@newcol) + ' ' + @datatype + ' NOT NULL';
             EXEC (@sql);
         END
 
-        -- Drop old column
         SET @sql = 'ALTER TABLE ' + @FullTable + ' DROP COLUMN ' + QUOTENAME(@col);
         EXEC (@sql);
 
-        -- Rename new column back
         SET @sql = 'EXEC sp_rename ''' + @SchemaName + '.' + @TableName + '.' + @newcol + ''',''' + @col + ''',''COLUMN''';
         EXEC (@sql);
 
@@ -248,33 +209,6 @@ BEGIN
 
     CLOSE cur2; DEALLOCATE cur2;
 
-    ---------------------------------------------------
-    -- Recreate indexes
-    ---------------------------------------------------
-    /*
-    DECLARE cur3 CURSOR FOR SELECT create_sql FROM #indexes;
-
-    OPEN cur3;
-    FETCH NEXT FROM cur3 INTO @sql;
-
-    WHILE @@FETCH_STATUS = 0
-    BEGIN
-        EXEC (@sql);
-        FETCH NEXT FROM cur3 INTO @sql;
-    END
-
-    CLOSE cur3; DEALLOCATE cur3;
-
-    */
-
-    PRINT 'SUCCESS: Identity removed, FKs dropped, PK dropped, triggers dropped, indexes not restored on ' + @FullTable;
-
-    RETURN;
-
-    ---------------------------------------------------
-    -- Skip identity removal if no identity column
-    ---------------------------------------------------
-    SkipIdentityRemoval:
-        PRINT 'Skipped identity removal for ' + @FullTable + ' (no identity columns)';
+    PRINT 'SUCCESS: Identity removed, FKs dropped, PK dropped, triggers dropped, indexes dropped on ' + @FullTable;
 END;
 GO

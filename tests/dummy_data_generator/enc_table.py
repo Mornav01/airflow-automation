@@ -1,3 +1,4 @@
+import os
 import mysql.connector
 from faker import Faker
 from tqdm import tqdm
@@ -10,8 +11,8 @@ MAX_ENC_COUNT_FOR_A_PATIENT = 5
 fake = Faker()
 connection = mysql.connector.connect(
     host="localhost",
-    user="root",
-    password="Neuro@123",
+    user=os.environ.get("DB_USER", ""),
+    password=os.environ.get("DB_PASS", ""),
     database="ndsource",
 )
 cursor = connection.cursor()

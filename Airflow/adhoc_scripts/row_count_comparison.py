@@ -17,8 +17,8 @@ from pathlib import Path
 
 import sqlalchemy
 
-MSSQL_CONN = "mssql+pyodbc://sa:ndADMIN2025@127.0.0.1:1437/mobiledoc_base_2302?driver=ODBC+Driver+17+for+SQL+Server"
-MYSQL_CONN = "mysql+pymysql://ndadmin:ndADMIN%402025@localhost:3306/deidentified_mobiledoc_base"
+MSSQL_CONN = os.environ.get("MSSQL_CONN", "")
+MYSQL_CONN = os.environ.get("MYSQL_CONN", "")
 
 SCRIPT_DIR = Path(__file__).parent
 

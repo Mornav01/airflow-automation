@@ -38,7 +38,7 @@ default_args = {
 with DAG(
     dag_id="diff_merge_runner_v3",
     description="Diff + Merge runner using Python diff script (not stored procedure)",
-    schedule="0 7 * * *",
+    schedule=None,
     start_date=pendulum.datetime(2026, 2, 1, tz=local_tz),
     catchup=False,
     default_args=default_args,
@@ -64,7 +64,6 @@ with DAG(
 
         cmd = [
             PYTHON_EXECUTABLE,
-            "-u",                                  # unbuffered stdout/stderr in child
             script_path,
             "--mode", "run",
             "--tables_csv", params["tables_csv"],
@@ -72,21 +71,17 @@ with DAG(
             "--state_dir", params["state_dir"],
         ]
 
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,              # merge stderr into stdout stream
-            text=True,
-            bufsize=1,                             # line-buffered on the parent side
-            env={**os.environ, "PYTHONUNBUFFERED": "1"},
-        )
+        result = subprocess.run(cmd, capture_output=True, text=True, env={**os.environ, "PYTHONUNBUFFERED": "1"})
 
-        for line in proc.stdout:                   # stream live to Airflow logs
-            logging.info(line.rstrip())
+        if result.stdout:
+            logging.info(result.stdout)
+        if result.stderr:
+            logging.info(result.stderr)
 
-        rc = proc.wait()
-        if rc != 0:
-            raise RuntimeError(f"Diff + Merge execution failed (exit {rc})")
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Diff + Merge execution failed:\n{result.stderr or result.stdout}"
+            )
 
     run_task = PythonOperator(
         task_id="run_diff_merge",
@@ -98,7 +93,6 @@ with DAG(
     # ──────────────────────────────────────────────
 
     def run_decryption(**context):
-        import logging
         params = context["params"]
 
         script_path = os.path.abspath(
@@ -107,28 +101,16 @@ with DAG(
 
         cmd = [
             PYTHON_EXECUTABLE,
-            "-u",
             script_path,
             "--tables_filepath", params["tables_csv"],
             "--pk_csv",          params["pk_csv"],
             "--state_dir",       params["state_dir"],
         ]
 
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            env={**os.environ, "PYTHONUNBUFFERED": "1"},
-        )
+        result = subprocess.run(cmd, env={**os.environ, "PYTHONUNBUFFERED": "1"})
 
-        for line in proc.stdout:
-            logging.info(line.rstrip())
-
-        rc = proc.wait()
-        if rc != 0:
-            raise RuntimeError(f"Decryption step failed (exit {rc})")
+        if result.returncode != 0:
+            raise RuntimeError("Decryption step failed")
 
     decryption_task = PythonOperator(
         task_id="run_decryption",

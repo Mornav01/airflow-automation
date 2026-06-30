@@ -4,16 +4,16 @@ source_db:
   host: localhost
   port: 3306
   database: mobiledoc_sep
-  username: ndadmin
-  password: ndADMIN%402025
+  username: ${DEST_USER}
+  password: ${DEST_PW}
 
 destination_db:
   type: mysql
   host: localhost
   port: 3306
   database: test_deid
-  username: ndadmin
-  password: ndADMIN%402025
+  username: ${DEST_USER}
+  password: ${DEST_PW}
 
 mappings_db:
   type: mysql
@@ -27,8 +27,8 @@ mappings_db:
 config_key: adhoc
 
 # ── State Storage ────────────────────────────────────────────────────
-state_db_path: /Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/deid_runtime/state.db
-failed_rows_db_path: /Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/deid_runtime/failed_rows.db
+state_db_path: ${LOG_DIR}/state.db
+failed_rows_db_path: ${LOG_DIR}/failed_rows.db
 # .deid_staging/ is auto-placed next to state.db (same folder)
 
 # ── Redis ────────────────────────────────────────────────────────────
@@ -42,7 +42,7 @@ deidentification:
   random_seed: 42
 
 # ── Tables & Rules ───────────────────────────────────────────────────
-rules_csv: /Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/Airflow/scripts/configs/arizona_config_rules.csv
+rules_csv: ${RULES_CSV}
 
 # ── Mapping Tables ───────────────────────────────────────────────────
 mapping_tables:
@@ -68,7 +68,7 @@ workers:
 
 # ── Logging ──────────────────────────────────────────────────────────
 logging:
-  log_dir: /Users/ndaicnsarizona/Desktop/production_state_incremental/state/deidentification/logs/adhoc
+  log_dir: ${LOG_DIR}/adhoc
 
 # ── Quality Control ──────────────────────────────────────────────────
 qc:
@@ -77,12 +77,12 @@ qc:
 
 # ── PII / Notes Config ───────────────────────────────────────────────
 pii_db:
-  master_connection_str: "mysql+pymysql://${DEST_USER}:${DEST_PW}@localhost:3306/master_sep"
-  secondary_pii_connection_str: "mysql+pymysql://${DEST_USER}:${DEST_PW}@localhost:3306/master_sep"
+  master_connection_str: "mysql+pymysql://${DEST_USER}:${DEST_PW}@${DB_HOST}:${MYSQL_PORT}/${MASTER_DB_NAME}"
+  secondary_pii_connection_str: "mysql+pymysql://${DEST_USER}:${DEST_PW}@${DB_HOST}:${MYSQL_PORT}/${MASTER_DB_NAME}"
 
-secondary_pii_config_path: /Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/Airflow/scripts/configs/arizona_secondary_pii_config.yaml
+secondary_pii_config_path: ${SECONDARY_PII_YAML}
 
-pii_config_path: /Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/Airflow/scripts/configs/arizona_pii_config.yaml
+pii_config_path: ${PII_YAML}
 
 # ── Reference Mapping Joins ───────────────────────────────────────────
-reference_mappings_path: /Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/Airflow/scripts/configs/ecw_reference_mappings.yaml
+reference_mappings_path: ${REF_MAPPING_YAML}

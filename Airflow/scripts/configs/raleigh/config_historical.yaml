@@ -4,24 +4,24 @@ source_db:
   host: localhost
   port: 3306
   database: athenaone
-  username: ndadmin
-  password: ndADMIN%402025
+  username: ${DEST_USER}
+  password: ${DEST_PW}
 
 destination_db:
   type: mysql
   host: localhost
   port: 3306
   database: deidentified_pg_test
-  username: ndadmin
-  password: ndADMIN%402025
+  username: ${DEST_USER}
+  password: ${DEST_PW}
 
 mappings_db:
   type: mysql
   host: localhost
   port: 3306
   database: mapping_pg
-  username: ndadmin
-  password: ndADMIN%402025
+  username: ${DEST_USER}
+  password: ${DEST_PW}
 
 # ── Namespace Key ────────────────────────────────────────────────────
 config_key: historical
@@ -32,8 +32,8 @@ config_key: historical
 # .deid_staging/ is auto-placed next to state.db (same folder)
 
 
-state_db_url: "mysql+pymysql://ndadmin:ndADMIN%402025@localhost:3306/deid_state"
-failed_rows_db_url: "mysql+pymysql://ndadmin:ndADMIN%402025@localhost:3306/deid_failed"
+state_db_url: "mysql+pymysql://${DEST_USER}:${DEST_PW}@localhost:3306/deid_state"
+failed_rows_db_url: "mysql+pymysql://${DEST_USER}:${DEST_PW}@localhost:3306/deid_failed"
 
 
 # ── Redis ────────────────────────────────────────────────────────────
@@ -88,8 +88,8 @@ qc:
 
 # ── PII / Notes Config ───────────────────────────────────────────────
 pii_db:
-  master_connection_str: "mysql+pymysql://ndadmin:ndADMIN%402025@localhost:3306/master_pg"
-  secondary_pii_connection_str: "mysql+pymysql://ndadmin:ndADMIN%402025@localhost:3306/master_pg"
+  master_connection_str: "mysql+pymysql://${DEST_USER}:${DEST_PW}@localhost:3306/master_pg"
+  secondary_pii_connection_str: "mysql+pymysql://${DEST_USER}:${DEST_PW}@localhost:3306/master_pg"
 
 secondary_pii_config_path: /Users/neurodiscoveryai/Desktop/athenaone_airflow_automation/services/configs/raleigh/raleigh_secondary_pii_config.yaml
 

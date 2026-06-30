@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-DAG 3 — Task 3: Delete Processed Original Data from original_diff_merged
+DAG 3 — Task 3: Delete Processed Original Data from original_diff_merged (MSSQL)
 
 The pipeline flow is:
     1. Diff + Merge    → accumulates original data into original_diff_merged
@@ -22,12 +22,15 @@ For each table in the CSV:
 """
 
 import argparse
+import concurrent.futures
 import csv
 import json
 import logging
 import os
 import sys
 from datetime import datetime
+
+import sqlalchemy as sa
 
 # ============================================================
 # ===================== CONFIG ===============================
@@ -97,24 +100,9 @@ class StateManager:
 # ============================================================
 
 def delete_old_diff_rows(table_name, cutoff_date, engine):
-    """
-    Delete processed original rows from original_diff_merged where
-    nd_extracted_date <= cutoff_date (last_processed_date).
-
-    These rows have already been deidentified and merged into the main
-    deidentified schema, so they are safe to remove from the original DB.
-
-    Returns the number of rows deleted.
-    """
-    import sqlalchemy as sa
-
-    preparer = engine.dialect.identifier_preparer
-    quoted_table = preparer.quote(table_name)
-    quoted_col   = preparer.quote(EXTRACTED_DATE_COLUMN)
-
     sql = sa.text(
-        f"DELETE FROM {quoted_table} "
-        f"WHERE {quoted_col} <= :cutoff"
+        f"DELETE FROM [{table_name}] "
+        f"WHERE [{EXTRACTED_DATE_COLUMN}] <= :cutoff"
     )
 
     with engine.begin() as conn:
@@ -184,27 +172,42 @@ def process_table(table_name, state_manager, engine):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--tables_filepath", required=True)
+    parser.add_argument("--max_workers",     type=int, default=8)
     args = parser.parse_args()
 
     setup_logging(STATE_DIR)
 
-    import sqlalchemy as sa
-    engine = sa.create_engine(DEID_DIFF_CONN)
+    engine = sa.create_engine(
+        DEID_DIFF_CONN,
+        pool_size=args.max_workers,
+        max_overflow=0,
+        pool_pre_ping=True,
+        pool_recycle=1800,
+    )
 
     with open(args.tables_filepath, newline="") as f:
         tables = [row[0].strip() for row in csv.reader(f)]
 
-    logging.info("Deleting processed original data from original_diff_merged for %d tables", len(tables))
+    logging.info("Deleting processed original data from original_diff_merged for %d tables "
+                 "with max_workers=%d", len(tables), args.max_workers)
 
     state_manager = StateManager(STATE_DIR)
 
     failed_tables = []
-    for table in tables:
-        try:
-            process_table(table, state_manager, engine)
-        except Exception:
-            logging.exception("[%s] unexpected error during delete", table)
-            failed_tables.append(table)
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=args.max_workers) as executor:
+            futures = {executor.submit(process_table, table, state_manager, engine): table
+                       for table in tables}
+            for future in concurrent.futures.as_completed(futures):
+                table = futures[future]
+                try:
+                    future.result()
+                except Exception:
+                    logging.exception("[%s] unexpected error during delete", table)
+                    failed_tables.append(table)
+    finally:
+        engine.dispose()
 
     if failed_tables:
         logging.error("Delete step failed for tables: %s", failed_tables)

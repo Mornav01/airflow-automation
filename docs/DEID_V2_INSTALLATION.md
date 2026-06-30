@@ -83,7 +83,7 @@ SOURCE_USER=sa
 SOURCE_PW=your_mssql_password
 
 # Destination DB (MySQL)
-DEST_USER=ndadmin
+DEST_USER=<mysql_user>
 DEST_PW=your_mysql_password
 
 # Python executable (used by manual script and Airflow DAG)

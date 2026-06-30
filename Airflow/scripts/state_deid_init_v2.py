@@ -19,6 +19,7 @@ see a fresh state for the current run, regardless of what previous runs wrote.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import csv
 import json
 import logging
@@ -108,6 +109,8 @@ def init_table_state(table_name: str, state_manager: StateManager):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--tables-filepath", required=True, help="Path to tables CSV")
+    parser.add_argument("--max-workers",     type=int, default=16,
+                        help="Parallel threads for state file writes (default: 16)")
     args = parser.parse_args()
 
     setup_logging(STATE_DIR)
@@ -115,12 +118,20 @@ def main():
     with open(args.tables_filepath, newline="") as f:
         tables = [row[0].strip() for row in csv.reader(f) if row and row[0].strip()]
 
-    logging.info("Initializing deid state for %d tables", len(tables))
+    logging.info("Initializing deid state for %d tables with max_workers=%d",
+                 len(tables), args.max_workers)
 
     state_manager = StateManager(STATE_DIR)
 
-    for table in tables:
-        init_table_state(table, state_manager)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.max_workers) as executor:
+        futures = {executor.submit(init_table_state, table, state_manager): table
+                   for table in tables}
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                future.result()
+            except Exception:
+                table = futures[future]
+                logging.exception("[%s] unexpected error during state init", table)
 
     logging.info("State init complete")
 
