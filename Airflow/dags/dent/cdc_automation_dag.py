@@ -313,18 +313,94 @@ def create_cdc_table_task(**context):
     return table_name
 
 
+# Tables the downstream delta/decrypt tasks always read from staging, even on
+# days when they had no CDC changes.  They must exist (possibly empty) in staging
+# or those tasks fail on a missing-table error:
+#   mapping_delta          → users, enc, structdemographics, structdatadetail
+#   master_pii_delta       → users, patients
+#   master_insurance_delta → hcfa, edi_invoice (INNER JOIN — both required)
+#   decrypt_pnotes         → progressnotes (raises RuntimeError if absent)
+# Keep this in sync if a downstream script starts reading a new staging table.
+_STAGING_FLOOR_TABLES = frozenset({
+    "users", "enc", "patients",
+    "structdemographics", "structdatadetail", "progressnotes",
+    "hcfa", "edi_invoice",
+})
+
+
+def _mysql_rows(config: dict, sql: str) -> list[list[str]]:
+    """Run a SELECT via the mysql CLI; return rows as tab-split lists of strings."""
+    r = subprocess.run(
+        ["mysql",
+         f"-h{config['mysql_host']}", f"-u{config['mysql_user']}", f"-p{config['mysql_pass']}",
+         "--batch", "--skip-column-names", "-e", sql],
+        capture_output=True, text=True, check=False,
+    )
+    if r.returncode != 0:
+        raise RuntimeError(f"MySQL query failed: {r.stderr.strip()}")
+    return [ln.split("\t") for ln in r.stdout.splitlines() if ln]
+
+
+def _resolve_cdc_table_name(**context) -> str:
+    """Return the change-log table name built by create_cdc_table (XCom, else derive)."""
+    ti = context.get("task_instance")
+    cdc_table = ti.xcom_pull(task_ids="create_cdc_table") if ti else None
+    if cdc_table:
+        return cdc_table
+    run_date = get_run_date(**context)
+    try:
+        return f"change_log_{datetime.strptime(run_date, '%Y-%m-%d').strftime('%m%d%Y')}"
+    except ValueError:
+        return f"change_log_{run_date.replace('-', '')}"
+
+
 def reset_staging_schema_task(**context):
-    """Reset staging schema: drop and recreate from prod schema structure."""
+    """Reset staging schema: drop, recreate, and clone ONLY the tables that have
+    deltas in today's change log (plus the required floor set) from prod structure.
+
+    Cloning just the changed subset — instead of the entire prod schema — is safe
+    because cdc_restore drives itself off SELECT DISTINCT table_name from the same
+    change log and reads its column metadata from staging: any table not in the log
+    is never written, so cloning it is pure waste.
+    """
     config = get_config(**context)
     _require_config(config, "mysql_user", "mysql_host", "staging_schema", "prod_schema")
 
     staging_schema = config["staging_schema"]
     prod_schema = config["prod_schema"]
+    cdc_schema = config.get("cdc_schema", "cdc")
     mysql_user = config["mysql_user"]
     mysql_pass = config["mysql_pass"]
     mysql_host = config["mysql_host"]
 
     logger.info("Resetting staging schema: %s", staging_schema)
+
+    # Determine which tables to clone: today's changed tables ∪ floor set.
+    cdc_table = _resolve_cdc_table_name(**context)
+    changed = {
+        row[0].lower()
+        for row in _mysql_rows(config, f"SELECT DISTINCT table_name FROM `{cdc_schema}`.`{cdc_table}`")
+        if row and row[0]
+    }
+    wanted = changed | _STAGING_FLOOR_TABLES
+
+    # Keep only names that exist in prod, using prod's exact spelling — change_log
+    # can store inconsistent case (e.g. labdata vs LabData) and may reference tables
+    # that no longer exist in prod (cdc_restore skips those as "new tables" anyway).
+    prod_by_lower = {
+        row[0].lower(): row[0]
+        for row in _mysql_rows(
+            config,
+            f"SELECT table_name FROM information_schema.tables "
+            f"WHERE table_schema = '{prod_schema}' AND table_type = 'BASE TABLE'",
+        )
+        if row and row[0]
+    }
+    tables_to_clone = sorted({prod_by_lower[t] for t in wanted if t in prod_by_lower})
+    logger.info(
+        "Cloning %d/%d changed table(s) + floor to staging %s: %s",
+        len(tables_to_clone), len(changed), staging_schema, tables_to_clone,
+    )
 
     # Step 1: Drop and create schema
     drop_create_sql = f"DROP SCHEMA IF EXISTS `{staging_schema}`; CREATE SCHEMA `{staging_schema}`;"
@@ -334,6 +410,10 @@ def reset_staging_schema_task(**context):
     if result1.returncode != 0:
         raise RuntimeError(f"Failed to reset staging schema: {result1.stderr}")
 
+    if not tables_to_clone:
+        logger.warning("No tables to clone for %s.%s — staging reset empty", cdc_schema, cdc_table)
+        return
+
     # Step 2: Dump structure to a temp .sql file, restore with --force, log skipped tables.
     with tempfile.NamedTemporaryFile(
         prefix=f"{prod_schema}_structure_", suffix=".sql", delete=False
@@ -341,16 +421,19 @@ def reset_staging_schema_task(**context):
         sql_file = tmp.name
 
     try:
-        # 2a. Dump schema structure to file.
+        # 2a. Dump schema structure of ONLY the selected tables to file.
+        # FK constraints to un-cloned tables are fine: mysqldump's preamble sets
+        # FOREIGN_KEY_CHECKS=0, so CREATE TABLE with a dangling FK still succeeds.
+        # (--routines is a no-op with a table list; per-table --triggers still apply.)
         dump_cmd = [
             "mysqldump",
             f"-h{mysql_host}", f"-u{mysql_user}", f"-p{mysql_pass}",
             "--no-data", "--routines", "--triggers",
             "--single-transaction", "--quick", "--set-gtid-purged=OFF",
             f"--result-file={sql_file}",
-            prod_schema,
+            prod_schema, *tables_to_clone,
         ]
-        logger.info("Dumping structure of %s to %s", prod_schema, sql_file)
+        logger.info("Dumping structure of %d table(s) from %s to %s", len(tables_to_clone), prod_schema, sql_file)
         r = subprocess.run(dump_cmd, check=False, capture_output=True, text=True)
         if r.returncode != 0:
             raise RuntimeError(f"mysqldump failed: {r.stderr}")
@@ -365,21 +448,20 @@ def reset_staging_schema_task(**context):
                 stdin=fh, check=False, capture_output=True,
             )
 
-        # 2c. Find tables that failed (exist in prod but not in staging).
-        def _list_tables(schema):
-            r = subprocess.run(
-                ["mysql", f"-h{mysql_host}", f"-u{mysql_user}", f"-p{mysql_pass}",
-                 "--batch", "--skip-column-names", "-e",
-                 f"SELECT table_name FROM information_schema.tables "
-                 f"WHERE table_schema = '{schema}' AND table_type = 'BASE TABLE'"],
-                capture_output=True, text=True, check=False,
+        # 2c. Find requested tables that failed to land in staging.
+        staging_tables = {
+            row[0].lower()
+            for row in _mysql_rows(
+                config,
+                f"SELECT table_name FROM information_schema.tables "
+                f"WHERE table_schema = '{staging_schema}' AND table_type = 'BASE TABLE'",
             )
-            return set(r.stdout.splitlines())
-
-        failed_tables = _list_tables(prod_schema) - _list_tables(staging_schema)
+            if row and row[0]
+        }
+        failed_tables = {t.lower() for t in tables_to_clone} - staging_tables
         if failed_tables:
             logger.warning(
-                "Skipped %d table(s) that could not be cloned to staging "
+                "Skipped %d requested table(s) that could not be cloned to staging "
                 "(row size too large or similar error): %s",
                 len(failed_tables), sorted(failed_tables),
             )
@@ -404,7 +486,7 @@ def reset_staging_schema_task(**context):
         except OSError:
             pass
 
-    logger.info("Staging schema %s reset successfully", staging_schema)
+    logger.info("Staging schema %s reset successfully (%d tables cloned)", staging_schema, len(tables_to_clone))
 
 
 # ──────────────────────────────────────────────
@@ -747,6 +829,7 @@ with DAG(
             deid_config = dag_run.conf.get("deid_config", {})
         
         master_schema = deid_config.get("master_schema") or config.get("master_schema", "master")
+        mapping_schema = deid_config.get("mapping_schema") or config.get("mapping_schema", "mapping")
         staging_schema = config["staging_schema"]
 
         pii_script = os.path.join(CDC_DIR, "master_pii_delta.py")
@@ -755,6 +838,7 @@ with DAG(
             pii_script,
             "--master_schema", master_schema,
             "--staging_schema", staging_schema,
+            "--mapping_schema", mapping_schema,
         ]
         
         logger.info("Running Master PII Delta Update")
@@ -786,14 +870,16 @@ with DAG(
             deid_config = dag_run.conf.get("deid_config", {})
         
         master_schema = deid_config.get("master_schema") or config.get("master_schema", "master")
+        mapping_schema = deid_config.get("mapping_schema") or config.get("mapping_schema", "mapping")
         staging_schema = config["staging_schema"]
-        
+
         insurance_script = os.path.join(CDC_DIR, "master_insurance_delta.py")
         cmd = [
             PYTHON_EXECUTABLE,
             insurance_script,
             "--master_schema", master_schema,
             "--staging_schema", staging_schema,
+            "--mapping_schema", mapping_schema,
         ]
         
         logger.info("Running Master Insurance Delta Update")
