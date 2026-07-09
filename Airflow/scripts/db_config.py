@@ -128,19 +128,6 @@ MAPPING_MYSQL_CONN = {
 MASTER_MSSQL_CONN_STR = f"mssql+pyodbc://{_SOURCE_USER}:{_SOURCE_PW}@{_PROD_HOST}:{_MSSQL_PORT}/{_PROD_DB_NAME}{_ODBC}"
 MASTER_MYSQL_CONN_STR = f"mysql+pymysql://{_DEST_USER}:{_DEST_PW}@{_DB_HOST}:{_MYSQL_PORT}/{_MASTER_DB_NAME}"
 
-# ── S3 transfer — optional, only populated when S3 transfer DAG is configured ─
-S3_TRANSFER_MYSQL_HOST     = os.environ.get("S3_TRANSFER_MYSQL_HOST", "")
-S3_TRANSFER_MYSQL_PORT     = os.environ.get("S3_TRANSFER_MYSQL_PORT", "3306")
-S3_TRANSFER_MYSQL_USER     = os.environ.get("S3_TRANSFER_MYSQL_USER", "")
-S3_TRANSFER_MYSQL_PASSWORD = os.environ.get("S3_TRANSFER_MYSQL_PASSWORD", "")
-S3_TRANSFER_MYSQL_SCHEMA   = os.environ.get("S3_TRANSFER_MYSQL_SCHEMA", "")
-S3_TRANSFER_MYSQLDUMP_PATH = os.environ.get("S3_TRANSFER_MYSQLDUMP_PATH", "mysqldump")
-S3_TRANSFER_MYSQL_PATH     = os.environ.get("S3_TRANSFER_MYSQL_PATH", "mysql")
-S3_TRANSFER_BUCKET         = os.environ.get("S3_TRANSFER_BUCKET", "")
-S3_TRANSFER_PREFIX         = os.environ.get("S3_TRANSFER_PREFIX", "")
-S3_TRANSFER_OUTPUT_BASE    = os.environ.get("S3_TRANSFER_OUTPUT_BASE", "")
-
-
 MAPPING_SQL_FILE=''
 MASTER_PII_SQL_FILE=''
 MASTER_INSURANCE_SQL_FILE=''
@@ -170,19 +157,3 @@ MAPPING_CONFIG_FILE     = os.environ.get("MAPPING_CONFIG_FILE", "")
 MASTER_SOURCE_CONN_STR  = os.environ.get("MASTER_SOURCE_CONN", "")
 MASTER_DEST_CONN_STR    = os.environ.get("MASTER_DEST_CONN", "")
 MASTER_MAPPING_CONN_STR = os.environ.get("MASTER_MAPPING_CONN", "")
-
-# Legacy AWS/S3 transfer DAG (dags/legacy/aws_transfer.py), superseded by
-# s3_transfer.py + s3_transfer_dag.py. Lazy reads keep it parse-clean.
-AWS_TRANSFER_MYSQL_HOST         = os.environ.get("AWS_TRANSFER_MYSQL_HOST", "")
-AWS_TRANSFER_MYSQL_PORT         = os.environ.get("AWS_TRANSFER_MYSQL_PORT", "3306")
-AWS_TRANSFER_MYSQL_USER         = os.environ.get("AWS_TRANSFER_MYSQL_USER", "")
-AWS_TRANSFER_MYSQL_PASSWORD     = os.environ.get("AWS_TRANSFER_MYSQL_PASSWORD", "")
-AWS_TRANSFER_MYSQL_SCHEMA       = os.environ.get("AWS_TRANSFER_MYSQL_SCHEMA", "")
-AWS_TRANSFER_MYSQLDUMP_PATH     = os.environ.get("AWS_TRANSFER_MYSQLDUMP_PATH", "mysqldump")
-AWS_TRANSFER_MYSQL_PATH         = os.environ.get("AWS_TRANSFER_MYSQL_PATH", "mysql")
-AWS_TRANSFER_S3_BUCKET          = os.environ.get("AWS_TRANSFER_S3_BUCKET", "")
-AWS_TRANSFER_S3_PREFIX          = os.environ.get("AWS_TRANSFER_S3_PREFIX", "")
-AWS_TRANSFER_OUTPUT_BASE        = os.environ.get("AWS_TRANSFER_OUTPUT_BASE", "")
-AWS_TRANSFER_COUNT_SCHEMA       = os.environ.get("AWS_TRANSFER_COUNT_SCHEMA", "")
-AWS_TRANSFER_COUNT_REPORT_LABEL = os.environ.get("AWS_TRANSFER_COUNT_REPORT_LABEL", "")
-AWS_TRANSFER_COUNT_S3_PREFIX    = os.environ.get("AWS_TRANSFER_COUNT_S3_PREFIX", "")
