@@ -90,9 +90,9 @@ DIFF_MERGE_TABLES_CSV        = os.environ.get("DIFF_MERGE_TABLES_CSV", "")
 # ──────────────────────────────────────────────────────────────────────────────
 
 # eCW pnotes decryption supports both MySQL and MSSQL source databases.
-# Set PNOTES_DB_TYPE=mysql (default) or mssql in the practice .env.
+# Set SOURCE_DB_TYPE=mysql (default) or mssql in the practice .env.
 # staging_schema is passed explicitly; credentials come from the environment.
-_PNOTES_DB_TYPE = os.environ.get("ECW_SOURCE_DB_TYPE", os.environ.get("PNOTES_DB_TYPE", "mysql"))
+_SOURCE_DB_TYPE = os.environ.get("SOURCE_DB_TYPE", "mysql")
 
 
 def task_decrypt_pnotes(**context):
@@ -101,7 +101,7 @@ def task_decrypt_pnotes(**context):
     cmd = [
         DEID_PYTHON, script,
         "--staging_schema", params["staging_schema"],
-        "--db_type", _PNOTES_DB_TYPE,
+        "--db_type", _SOURCE_DB_TYPE,
     ]
     rc, out = _run_streaming(cmd, env=_ENV)
     if rc != 0:

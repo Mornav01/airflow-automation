@@ -1,11 +1,11 @@
 # ── Source & Destination Databases ──────────────────────────────────
 source_db:
-  type: mysql
-  host: ${DB_HOST}
-  port: ${DB_PORT}
+  type: ${SOURCE_DB_TYPE}
+  host: ${SOURCE_DB_HOST:-${DB_HOST}}
+  port: ${SOURCE_DB_PORT}
   database: ${STAGING_SCHEMA}
-  username: ${DB_USER}
-  password: ${DB_PASS}
+  username: ${SOURCE_DB_USER}
+  password: ${SOURCE_DB_PASS}
 
 destination_db:
   type: mysql

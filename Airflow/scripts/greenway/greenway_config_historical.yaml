@@ -1,27 +1,27 @@
 # ── Source & Destination Databases ──────────────────────────────────
 source_db:
-  type: mssql
-  host: ${DB_HOST}
-  port: ${MSSQL_PORT}
+  type: ${SOURCE_DB_TYPE}
+  host: ${SOURCE_DB_HOST:-${DB_HOST}}
+  port: ${SOURCE_DB_PORT}
   database: ${PROD_DB_NAME}
-  username: ${SOURCE_USER}
-  password: ${SOURCE_PW}
+  username: ${SOURCE_DB_USER}
+  password: ${SOURCE_DB_PASS}
 
 destination_db:
   type: mysql
   host: ${DB_HOST}
-  port: ${MYSQL_PORT}
+  port: ${DB_PORT}
   database: ${DEID_BASE_NAME}
-  username: ${DEST_USER}
-  password: ${DEST_PW}
+  username: ${DB_USER}
+  password: ${DB_PASS}
 
 mappings_db:
   type: mysql
   host: ${DB_HOST}
-  port: ${MYSQL_PORT}
+  port: ${DB_PORT}
   database: ${MAPPING_DB_NAME}
-  username: ${DEST_USER}
-  password: ${DEST_PW}
+  username: ${DB_USER}
+  password: ${DB_PASS}
 
 # ── Namespace Key ────────────────────────────────────────────────────
 config_key: historical
@@ -79,8 +79,8 @@ qc:
 # ── PII / Notes Config ───────────────────────────────────────────────
 # These strings will need to be parsed by your loader to inject the env vars
 pii_db:
-  master_connection_str: "mysql+pymysql://${DEST_USER}:${DEST_PW}@${DB_HOST}:${MYSQL_PORT}/${MASTER_DB_NAME}"
-  secondary_pii_connection_str: "mysql+pymysql://${DEST_USER}:${DEST_PW}@${DB_HOST}:${MYSQL_PORT}/${MASTER_DB_NAME}"
+  master_connection_str: "mysql+pymysql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${MASTER_DB_NAME}"
+  secondary_pii_connection_str: "mysql+pymysql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${MASTER_DB_NAME}"
 
 secondary_pii_config_path: ${SECONDARY_PII_YAML}
 

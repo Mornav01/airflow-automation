@@ -1,35 +1,35 @@
 # ── Source & Destination Databases ──────────────────────────────────
 source_db:
-  type: mssql
+  type: ${SOURCE_DB_TYPE}
   host: localhost
   port: 1435
   database: mobiledoc_diff_merged
-  username: ${SOURCE_USER}
-  password: ${SOURCE_PW}
+  username: ${SOURCE_DB_USER}
+  password: ${SOURCE_DB_PASS}
 
 destination_db:
   type: mysql
   host: localhost
   port: 3306
   database: deidentified_mobiledoc_diff_staging
-  username: ${DEST_USER}
-  password: ${DEST_PW}
+  username: ${DB_USER}
+  password: ${DB_PASS}
 
 mappings_db:
   type: mysql
   host: localhost
   port: 3306
   database: mapping_oct
-  username: ${DEST_USER}
-  password: ${DEST_PW}
+  username: ${DB_USER}
+  password: ${DB_PASS}
 
 join_db:
   type: mssql
   host: 127.0.0.1
   port: 1437
   database: mobiledoc_latest
-  username: ${DEST_USER}
-  password: ${DEST_PW}
+  username: ${DB_USER}
+  password: ${DB_PASS}
 
 # ── Namespace Key ────────────────────────────────────────────────────
 config_key: incremental
@@ -39,8 +39,8 @@ config_key: incremental
 #failed_rows_db_path: /Users/ndainoran/airflow_latest/airflow-automation/deid_runtime/failed_rows.db
 # .deid_staging/ is auto-placed next to state.db (same folder)
 
-state_db_url: "mysql+pymysql://${DEST_USER}:${DEST_PW}@localhost:3306/deid_state"
-failed_rows_db_url: "mysql+pymysql://${DEST_USER}:${DEST_PW}@localhost:3306/deid_failed"
+state_db_url: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/deid_state"
+failed_rows_db_url: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/deid_failed"
 
 # ── Redis ────────────────────────────────────────────────────────────
 redis_url: redis://localhost:6379/0
@@ -91,8 +91,8 @@ qc:
 
 # ── PII / Notes Config ───────────────────────────────────────────────
 pii_db:
-  master_connection_str: "mysql+pymysql://${DEST_USER}:${DEST_PW}@localhost:3306/master_pg"
-  secondary_pii_connection_str: "mysql+pymysql://${DEST_USER}:${DEST_PW}@localhost:3306/master_pg"
+  master_connection_str: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/master_pg"
+  secondary_pii_connection_str: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/master_pg"
 
 secondary_pii_config_path: /Users/neurodiscoveryai/Desktop/AIR_DEID_V2/airflow-automation/Airflow/scripts/configs/northwest/northwest_secondary_pii_config.yaml
 

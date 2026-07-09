@@ -24,7 +24,7 @@ Notes vs the old `mapping` structure:
     denormalised on the encounter row.
   - reference_mapping / created_by / updated_by are gone.
 
-The staging source dialect is controlled by ECW_SOURCE_DB_TYPE ("mysql" default, or
+The staging source dialect is controlled by SOURCE_DB_TYPE ("mysql" default, or
 "mssql"); the mapping (dest) schema is always MySQL.
 
 Usage:
@@ -64,7 +64,7 @@ MYSQL_PORT = int(os.environ.get("DB_PORT", "3306"))
 
 # Controls the dialect used for the eCW staging source database.
 # "mysql" (default) or "mssql". Dest engines (mapping/master) are always MySQL.
-ECW_SOURCE_DB_TYPE = os.environ.get("ECW_SOURCE_DB_TYPE", "mysql")
+SOURCE_DB_TYPE = os.environ.get("SOURCE_DB_TYPE", "mysql")
 
 
 logging.basicConfig(
@@ -81,13 +81,13 @@ def create_mysql_engine(schema: str):
 
 
 def build_source_engine(schema: str):
-    """Engine for the eCW staging source — dialect controlled by ECW_SOURCE_DB_TYPE."""
+    """Engine for the eCW staging source — dialect controlled by SOURCE_DB_TYPE."""
     from urllib.parse import quote_plus
-    if ECW_SOURCE_DB_TYPE == "mssql":
-        host = os.environ.get("DB_HOST", "localhost")
-        user = os.environ.get("SOURCE_USER", "")
-        password = os.environ.get("SOURCE_PW", "")
-        port = int(os.environ.get("MSSQL_PORT", 1433))
+    user = os.environ.get("SOURCE_DB_USER", "")
+    password = os.environ.get("SOURCE_DB_PASS", "")
+    host = os.environ.get("SOURCE_DB_HOST") or os.environ.get("DB_HOST", "localhost")
+    if SOURCE_DB_TYPE == "mssql":
+        port = int(os.environ.get("SOURCE_DB_PORT", 1433))
         odbc_driver = os.environ.get("ODBC_DRIVER", "ODBC Driver 17 for SQL Server").replace(" ", "+")
         url = (
             f"mssql+pyodbc://{quote_plus(user)}:{quote_plus(password)}"
@@ -95,7 +95,8 @@ def build_source_engine(schema: str):
             f"?driver={odbc_driver}&TrustServerCertificate=yes"
         )
         return create_engine(url, pool_recycle=3600, pool_pre_ping=True)
-    url = f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASS}@{MYSQL_HOST}:{MYSQL_PORT}/{schema}"
+    port = int(os.environ.get("SOURCE_DB_PORT", 3306))
+    url = f"mysql+pymysql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{schema}"
     return create_engine(url, pool_recycle=3600, pool_pre_ping=True, connect_args={"init_command": "SET sql_mode=''"})
 
 

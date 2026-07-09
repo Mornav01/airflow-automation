@@ -1,11 +1,16 @@
 # ── Source & Destination Databases ──────────────────────────────────
+# Source engine is client-specific: mysql or mssql, driven by SOURCE_DB_TYPE.
+# All source connection primitives come from the SOURCE_DB_* family, set per
+# machine in .env. SOURCE_DB_HOST falls back to DB_HOST when the source is local.
+#   mysql → SOURCE_DB_PORT=3306 ; mssql → SOURCE_DB_PORT=1433
+# destination/mappings/join stay MySQL (DB_*) below.
 source_db:
-  type: mysql
-  host: ${DB_HOST}
-  port: ${DB_PORT}
+  type: ${SOURCE_DB_TYPE}
+  host: ${SOURCE_DB_HOST:-${DB_HOST}}
+  port: ${SOURCE_DB_PORT}
   database: ${STAGING_SCHEMA}
-  username: ${DB_USER}
-  password: ${DB_PASS}
+  username: ${SOURCE_DB_USER}
+  password: ${SOURCE_DB_PASS}
 
 destination_db:
   type: mysql

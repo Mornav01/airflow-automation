@@ -100,7 +100,7 @@ def process_row_batch(row_dicts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def build_engine(db_type: str, db_host: str, db_user: str, db_pass: str, schema: str, db_port: int = None):
     from urllib.parse import quote_plus
     if db_type == "mssql":
-        port = db_port or int(os.environ.get("MSSQL_PORT", 1433))
+        port = db_port or int(os.environ.get("SOURCE_DB_PORT", 1433))
         odbc_driver = os.environ.get("ODBC_DRIVER", "ODBC Driver 17 for SQL Server").replace(" ", "+")
         url = (
             f"mssql+pyodbc://{quote_plus(db_user)}:{quote_plus(db_pass)}"
@@ -108,7 +108,7 @@ def build_engine(db_type: str, db_host: str, db_user: str, db_pass: str, schema:
             f"?driver={odbc_driver}&TrustServerCertificate=yes"
         )
     else:
-        port = db_port or int(os.environ.get("MYSQL_PORT", 3306))
+        port = db_port or int(os.environ.get("SOURCE_DB_PORT", 3306))
         url = f"mysql+pymysql://{db_user}:{quote_plus(db_pass)}@{db_host}:{port}/{schema}"
     engine = create_engine(url, pool_size=5, max_overflow=10, pool_pre_ping=True)
     try:
@@ -231,7 +231,7 @@ def run_pipeline(
 
 def main(
     staging_schema: str,
-    db_type: str = os.environ.get("ECW_SOURCE_DB_TYPE", os.environ.get("PNOTES_DB_TYPE", "mysql")),
+    db_type: str = os.environ.get("SOURCE_DB_TYPE", "mysql"),
     db_host: Optional[str] = None,
     db_user: Optional[str] = None,
     db_pass: Optional[str] = None,
@@ -242,17 +242,11 @@ def main(
 ):
     # Resolve credentials from environment based on db_type when not provided explicitly.
     if db_host is None:
-        db_host = os.environ.get("DB_HOST", "localhost")
-    if db_type == "mssql":
-        if db_user is None:
-            db_user = os.environ.get("SOURCE_USER", "")
-        if db_pass is None:
-            db_pass = os.environ.get("SOURCE_PW", "")
-    else:
-        if db_user is None:
-            db_user = os.environ.get("DB_USER", "")
-        if db_pass is None:
-            db_pass = os.environ.get("DB_PASS", "")
+        db_host = os.environ.get("SOURCE_DB_HOST") or os.environ.get("DB_HOST", "localhost")
+    if db_user is None:
+        db_user = os.environ.get("SOURCE_DB_USER", "")
+    if db_pass is None:
+        db_pass = os.environ.get("SOURCE_DB_PASS", "")
 
     new_table_name = new_table_name or f"{table_name}_decryptfinal"
     logger.info("Starting decrypt_pnotes: db_type=%s, schema=%s, table=%s", db_type, staging_schema, table_name)
@@ -279,14 +273,14 @@ if __name__ == "__main__":
     )
     parser.add_argument("--staging_schema", required=True, help="Source database/schema name")
     parser.add_argument(
-        "--db_type", default=os.environ.get("ECW_SOURCE_DB_TYPE", os.environ.get("PNOTES_DB_TYPE", "mysql")),
+        "--db_type", default=os.environ.get("SOURCE_DB_TYPE", "mysql"),
         choices=["mysql", "mssql"],
         help="Database dialect: mysql (default) or mssql. "
-             "mysql uses DB_USER/DB_PASS; mssql uses SOURCE_USER/SOURCE_PW.",
+             "Credentials come from SOURCE_DB_USER/SOURCE_DB_PASS.",
     )
-    parser.add_argument("--db_host", default=None, help="Overrides DB_HOST env var")
-    parser.add_argument("--db_user", default=None, help="Overrides DB_USER (mysql) or SOURCE_USER (mssql)")
-    parser.add_argument("--db_pass", default=None, help="Overrides DB_PASS (mysql) or SOURCE_PW (mssql)")
+    parser.add_argument("--db_host", default=None, help="Overrides SOURCE_DB_HOST / DB_HOST env var")
+    parser.add_argument("--db_user", default=None, help="Overrides SOURCE_DB_USER")
+    parser.add_argument("--db_pass", default=None, help="Overrides SOURCE_DB_PASS")
     parser.add_argument("--table_name", default="progressnotes")
     parser.add_argument("--new_table_name", default=None)
     parser.add_argument("--max_workers", type=int, default=8, help="CPU worker processes for decryption")

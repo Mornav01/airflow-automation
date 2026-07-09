@@ -54,14 +54,18 @@ def _load_env_file(path: str) -> None:
 _load_env_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
 
 # ── Primitive env vars — literal values, no ${VAR} expansion needed ─────────────
-_SOURCE_USER  = os.environ.get("SOURCE_USER", "")
-_SOURCE_PW    = os.environ.get("SOURCE_PW", "")
-_DEST_USER    = os.environ.get("DEST_USER", "")
-_DEST_PW      = os.environ.get("DEST_PW", "")
+# SOURCE_DB_* = the client source DB (read side). DB_* = the local MySQL working
+# DB (write side). SOURCE_DB_HOST falls back to DB_HOST (source is usually local);
+# PROD_HOST (remote prod MSSQL for mapping/master) falls back to SOURCE_DB_HOST.
+_SOURCE_USER  = os.environ.get("SOURCE_DB_USER", "")
+_SOURCE_PW    = os.environ.get("SOURCE_DB_PASS", "")
+_DB_USER      = os.environ.get("DB_USER", "")
+_DB_PASS      = os.environ.get("DB_PASS", "")
 _DB_HOST      = os.environ.get("DB_HOST", "localhost")
-_PROD_HOST    = os.environ.get("PROD_HOST", os.environ.get("DB_HOST", "localhost"))
-_MSSQL_PORT   = os.environ.get("MSSQL_PORT", "1433")
-_MYSQL_PORT   = os.environ.get("MYSQL_PORT", "3306")
+_SOURCE_HOST  = os.environ.get("SOURCE_DB_HOST") or _DB_HOST
+_PROD_HOST    = os.environ.get("PROD_HOST") or _SOURCE_HOST
+_SOURCE_PORT  = os.environ.get("SOURCE_DB_PORT", "1433")
+_DB_PORT      = os.environ.get("DB_PORT", "3306")
 
 _BASE_DB_NAME    = os.environ.get("BASE_DB_NAME", "")
 _PROD_DB_NAME    = os.environ.get("PROD_DB_NAME", "")
@@ -88,18 +92,18 @@ PK_CSV                       = os.environ.get("PK_CSV", "")
 HISTORICAL_DATA_DEFAULT_DATE = os.environ.get("HISTORICAL_DATA_DEFAULT_DATE", "")
 
 # ── MSSQL connection strings — built from primitives ───────────────────────────
-BASE_DB         = f"mssql+pyodbc://{_SOURCE_USER}:{_SOURCE_PW}@{_DB_HOST}:{_MSSQL_PORT}/{_BASE_DB_NAME}{_ODBC}"
-PROD_DB         = f"mssql+pyodbc://{_SOURCE_USER}:{_SOURCE_PW}@{_PROD_HOST}:{_MSSQL_PORT}/{_PROD_DB_NAME}{_ODBC}"
-DIFF_STAGING_DB = f"mssql+pyodbc://{_SOURCE_USER}:{_SOURCE_PW}@{_DB_HOST}:{_MSSQL_PORT}/{_STAGING_DB_NAME}{_ODBC}"
-DIFFMERGED_CONN = f"mssql+pyodbc://{_SOURCE_USER}:{_SOURCE_PW}@{_DB_HOST}:{_MSSQL_PORT}/{_MERGED_DB_NAME}{_ODBC}"
+BASE_DB         = f"mssql+pyodbc://{_SOURCE_USER}:{_SOURCE_PW}@{_SOURCE_HOST}:{_SOURCE_PORT}/{_BASE_DB_NAME}{_ODBC}"
+PROD_DB         = f"mssql+pyodbc://{_SOURCE_USER}:{_SOURCE_PW}@{_PROD_HOST}:{_SOURCE_PORT}/{_PROD_DB_NAME}{_ODBC}"
+DIFF_STAGING_DB = f"mssql+pyodbc://{_SOURCE_USER}:{_SOURCE_PW}@{_SOURCE_HOST}:{_SOURCE_PORT}/{_STAGING_DB_NAME}{_ODBC}"
+DIFFMERGED_CONN = f"mssql+pyodbc://{_SOURCE_USER}:{_SOURCE_PW}@{_SOURCE_HOST}:{_SOURCE_PORT}/{_MERGED_DB_NAME}{_ODBC}"
 
 DB_TYPE     = "mssql"
 DIFF_SCHEMA = "dbo"
 
 # ── MySQL connection strings — built from primitives ───────────────────────────
-MYSQL_DEID_BASE_CONN       = f"mysql+pymysql://{_DEST_USER}:{_DEST_PW}@{_DB_HOST}:{_MYSQL_PORT}/{_DEID_BASE_NAME}"
-MYSQL_DEID_STAGING_CONN    = f"mysql+pymysql://{_DEST_USER}:{_DEST_PW}@{_DB_HOST}:{_MYSQL_PORT}/{_DEID_STAGING_NAME}"
-MYSQL_DEID_DIFFMERGED_CONN = f"mysql+pymysql://{_DEST_USER}:{_DEST_PW}@{_DB_HOST}:{_MYSQL_PORT}/{_DEID_MERGED_NAME}"
+MYSQL_DEID_BASE_CONN       = f"mysql+pymysql://{_DB_USER}:{_DB_PASS}@{_DB_HOST}:{_DB_PORT}/{_DEID_BASE_NAME}"
+MYSQL_DEID_STAGING_CONN    = f"mysql+pymysql://{_DB_USER}:{_DB_PASS}@{_DB_HOST}:{_DB_PORT}/{_DEID_STAGING_NAME}"
+MYSQL_DEID_DIFFMERGED_CONN = f"mysql+pymysql://{_DB_USER}:{_DB_PASS}@{_DB_HOST}:{_DB_PORT}/{_DEID_MERGED_NAME}"
 
 # ── Deid config ──────────────────────────────────────────────────
 DBDETAILSMODEL_NAME = os.environ.get("DBDETAILSMODEL_NAME", "")
@@ -112,7 +116,7 @@ DEID_POST_PROCESS_TABLES_CSV = os.environ.get("DEID_POST_PROCESS_TABLES_CSV", ""
 # ── Mapping dict (mssql_incremental_mapping_update*.py) ─────────────────────────
 MAPPING_MSSQL_CONN = {
     "server":   _PROD_HOST,
-    "port":     int(_MSSQL_PORT),
+    "port":     int(_SOURCE_PORT),
     "database": _PROD_DB_NAME,
     "user":     _SOURCE_USER,
     "password": _SOURCE_PW,
@@ -120,13 +124,13 @@ MAPPING_MSSQL_CONN = {
 MAPPING_MYSQL_CONN = {
     "host":     _DB_HOST,
     "database": _MAPPING_DB_NAME,
-    "user":     _DEST_USER,
-    "password": _DEST_PW,
+    "user":     _DB_USER,
+    "password": _DB_PASS,
 }
 
 # ── Master recreate connection strings (mssql_incremental_master_recreate.py) ───
-MASTER_MSSQL_CONN_STR = f"mssql+pyodbc://{_SOURCE_USER}:{_SOURCE_PW}@{_PROD_HOST}:{_MSSQL_PORT}/{_PROD_DB_NAME}{_ODBC}"
-MASTER_MYSQL_CONN_STR = f"mysql+pymysql://{_DEST_USER}:{_DEST_PW}@{_DB_HOST}:{_MYSQL_PORT}/{_MASTER_DB_NAME}"
+MASTER_MSSQL_CONN_STR = f"mssql+pyodbc://{_SOURCE_USER}:{_SOURCE_PW}@{_PROD_HOST}:{_SOURCE_PORT}/{_PROD_DB_NAME}{_ODBC}"
+MASTER_MYSQL_CONN_STR = f"mysql+pymysql://{_DB_USER}:{_DB_PASS}@{_DB_HOST}:{_DB_PORT}/{_MASTER_DB_NAME}"
 
 MAPPING_SQL_FILE=''
 MASTER_PII_SQL_FILE=''

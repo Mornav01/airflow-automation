@@ -32,10 +32,10 @@ MYSQL_PASS = os.environ.get("DB_PASS", "")
 MYSQL_HOST = os.environ.get("DB_HOST", "localhost")
 MYSQL_PORT = int(os.environ.get("DB_PORT", "3306"))
 
-MSSQL_USER = os.environ.get("SOURCE_USER", "sa")
-MSSQL_PASS = os.environ.get("SOURCE_PW", "")
-MSSQL_HOST = os.environ.get("DB_HOST", "localhost")
-MSSQL_PORT = int(os.environ.get("MSSQL_PORT", "1433"))
+MSSQL_USER = os.environ.get("SOURCE_DB_USER", "sa")
+MSSQL_PASS = os.environ.get("SOURCE_DB_PASS", "")
+MSSQL_HOST = os.environ.get("SOURCE_DB_HOST") or os.environ.get("DB_HOST", "localhost")
+MSSQL_PORT = int(os.environ.get("SOURCE_DB_PORT", "1433"))
 
 
 logging.basicConfig(
