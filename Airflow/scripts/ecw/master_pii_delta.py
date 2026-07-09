@@ -20,8 +20,10 @@ Usage:
 """
 
 import argparse
+import json
 import logging
 import os
+from datetime import datetime, timezone
 
 from sqlalchemy import create_engine, text
 
@@ -78,7 +80,7 @@ def load_patient_map(mapping_schema: str) -> dict:
     return {row[0]: row[1] for row in rows}
 
 
-def run_master_pii_delta(master_schema: str, staging_schema: str, mapping_schema: str):
+def run_master_pii_delta(master_schema: str, staging_schema: str, mapping_schema: str, state_file: str = ""):
     """
     Apply delta updates to pii_data_table in master_schema from staging_schema,
     keyed on nd_patient_id resolved via mapping_schema.
@@ -345,6 +347,12 @@ def run_master_pii_delta(master_schema: str, staging_schema: str, mapping_schema
 
     logger.info("Master PII delta processing complete")
 
+    if state_file:
+        os.makedirs(os.path.dirname(state_file), exist_ok=True)
+        with open(state_file, "w") as f:
+            json.dump({"success": True, "completed_at": datetime.now(timezone.utc).isoformat()}, f, indent=2)
+        logger.info("Wrote state file: %s", state_file)
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -365,6 +373,11 @@ def main():
         required=True,
         help="Mapping schema name for nd_patient_id resolution (e.g. 'mapping_pg')",
     )
+    parser.add_argument(
+        "--state_file",
+        default="",
+        help="Optional path to write JSON state file on success",
+    )
 
     args = parser.parse_args()
 
@@ -372,6 +385,7 @@ def main():
         master_schema=args.master_schema,
         staging_schema=args.staging_schema,
         mapping_schema=args.mapping_schema,
+        state_file=args.state_file,
     )
 
 

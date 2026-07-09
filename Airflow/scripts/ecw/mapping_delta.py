@@ -32,6 +32,7 @@ Usage:
 """
 
 import argparse
+import json
 import logging
 import os
 import random
@@ -98,7 +99,7 @@ def build_source_engine(schema: str):
     return create_engine(url, pool_recycle=3600, pool_pre_ping=True, connect_args={"init_command": "SET sql_mode=''"})
 
 
-def run_mapping_delta(mapping_schema: str, staging_schema: str):
+def run_mapping_delta(mapping_schema: str, staging_schema: str, state_file: str = ""):
     """
     Run mapping delta logic:
     - Update/insert into patient_mapping_table
@@ -513,6 +514,12 @@ def run_mapping_delta(mapping_schema: str, staging_schema: str):
 
     logger.info("Mapping delta processing complete")
 
+    if state_file:
+        os.makedirs(os.path.dirname(state_file), exist_ok=True)
+        with open(state_file, "w") as f:
+            json.dump({"success": True, "completed_at": datetime.now(timezone.utc).isoformat()}, f, indent=2)
+        logger.info("Wrote state file: %s", state_file)
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -528,12 +535,18 @@ def main():
         required=True,
         help="Staging schema name (e.g. 'mobiledoc_staging')",
     )
+    parser.add_argument(
+        "--state_file",
+        default="",
+        help="Optional path to write JSON state file on success",
+    )
 
     args = parser.parse_args()
 
     run_mapping_delta(
         mapping_schema=args.mapping_schema,
         staging_schema=args.staging_schema,
+        state_file=args.state_file,
     )
 
 

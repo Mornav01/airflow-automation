@@ -146,6 +146,7 @@ def task_validate_mapping(**_):
         "pii_data":         _PII_STATE_FILE,
         "master_insurance": _MASTER_STATE_FILE,
     }
+    today = date.today().isoformat()
     failed = []
     for name, path in state_files.items():
         if not os.path.exists(path):
@@ -153,10 +154,26 @@ def task_validate_mapping(**_):
         with open(path) as f:
             state = json.load(f)
         logger.info("State [%s]:\n%s", name, json.dumps(state, indent=4))
+
         if not state.get("success", False):
-            failed.append(name)
+            failed.append(f"{name} (success=false)")
+            continue
+
+        # A state file is written only on success and is never deleted, so a
+        # stale success from a previous run could mask a failure/no-run today.
+        # Require completed_at to be the current day (converted to local time,
+        # matching date.today() used elsewhere in the pipeline).
+        completed_at = state.get("completed_at", "")
+        try:
+            run_date = datetime.fromisoformat(completed_at).astimezone().date().isoformat()
+        except ValueError:
+            failed.append(f"{name} (invalid/missing completed_at: {completed_at!r})")
+            continue
+        if run_date != today:
+            failed.append(f"{name} (stale: last success {run_date}, not today {today})")
+
     if failed:
-        raise RuntimeError(f"Mapping pipeline failed. Components: {', '.join(failed)}")
+        raise RuntimeError(f"Mapping pipeline failed or stale. Components: {', '.join(failed)}")
 
 
 def task_init_deid_state(**context):
