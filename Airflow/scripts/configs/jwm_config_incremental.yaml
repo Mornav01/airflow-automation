@@ -1,7 +1,7 @@
 # ── Source & Destination Databases ──────────────────────────────────
 source_db:
   type: ${SOURCE_DB_TYPE}
-  host: ${SOURCE_DB_HOST:-${DB_HOST}}
+  host: ${SOURCE_DB_HOST}
   port: ${SOURCE_DB_PORT}
   database: ${MERGED_DB_NAME}
   username: ${SOURCE_DB_USER}
