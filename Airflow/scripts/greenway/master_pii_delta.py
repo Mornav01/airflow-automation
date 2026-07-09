@@ -53,7 +53,13 @@ def create_mysql_engine(schema: str):
 
 def create_mssql_engine(schema: str):
     """MSSQL engine for the Greenway/PrimeSUITE staging source."""
-    url = f"mssql+pymssql://{MSSQL_USER}:{MSSQL_PASS}@{MSSQL_HOST}:{MSSQL_PORT}/{schema}"
+    from urllib.parse import quote_plus
+    odbc_driver = os.environ.get("ODBC_DRIVER", "ODBC Driver 17 for SQL Server").replace(" ", "+")
+    url = (
+        f"mssql+pyodbc://{quote_plus(MSSQL_USER)}:{quote_plus(MSSQL_PASS)}"
+        f"@{MSSQL_HOST}:{MSSQL_PORT}/{schema}"
+        f"?driver={odbc_driver}&TrustServerCertificate=yes"
+    )
     return create_engine(url, pool_recycle=3600, pool_pre_ping=True)
 
 

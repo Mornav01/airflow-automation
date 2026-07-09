@@ -23,6 +23,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from lxml import etree
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
 
 # ──────────────────────────────────────────────────────────────
 # Config
@@ -36,7 +37,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-SOURCE_CONN   = os.environ.get("CNOTES_SOURCE_CONN", "")
+def _with_odbc_driver(conn_str: str) -> str:
+    """Force the ODBC driver on a pyodbc MSSQL URL to match the ODBC_DRIVER env
+    var (default: ODBC Driver 17), so the driver is controlled centrally like in
+    db_config instead of being baked into the .env connection string. Non-pyodbc
+    URLs (e.g. the MySQL dest) are returned unchanged."""
+    if not conn_str or "pyodbc" not in conn_str:
+        return conn_str
+    url = make_url(conn_str)
+    query = dict(url.query)
+    query["driver"] = os.environ.get("ODBC_DRIVER", "ODBC Driver 17 for SQL Server")
+    query.setdefault("TrustServerCertificate", "yes")
+    return url.set(query=query).render_as_string(hide_password=False)
+
+
+SOURCE_CONN   = _with_odbc_driver(os.environ.get("CNOTES_SOURCE_CONN", ""))
 DEST_CONN     = os.environ.get("CNOTES_DEST_CONN",   "")
 LINKED_DB     = os.environ.get("CNOTES_LINKED_DB",   "Primerecord_Latest")
 BATCH_SIZE    = int(os.environ.get("CNOTES_BATCH_SIZE", "10000"))

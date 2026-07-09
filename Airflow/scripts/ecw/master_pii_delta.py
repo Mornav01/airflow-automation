@@ -57,10 +57,11 @@ def build_source_engine(schema: str):
         user = os.environ.get("SOURCE_USER", "")
         password = os.environ.get("SOURCE_PW", "")
         port = int(os.environ.get("MSSQL_PORT", 1433))
+        odbc_driver = os.environ.get("ODBC_DRIVER", "ODBC Driver 17 for SQL Server").replace(" ", "+")
         url = (
             f"mssql+pyodbc://{quote_plus(user)}:{quote_plus(password)}"
             f"@{host}:{port}/{schema}"
-            "?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes"
+            f"?driver={odbc_driver}&TrustServerCertificate=yes"
         )
         return create_engine(url, pool_recycle=3600, pool_pre_ping=True)
     url = f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASS}@{MYSQL_HOST}:{MYSQL_PORT}/{schema}"

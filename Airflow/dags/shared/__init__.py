@@ -11,6 +11,7 @@ DAG files.
 """
 import logging
 import os
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,21 @@ def _load_env_file(path: str) -> None:
                     continue
                 _key, _, _val = _line.partition("=")
                 _key = _key.strip()
-                _val = _val.strip().strip('"').strip("'")
+                _val = _val.strip()
+                # Quoted value: take the literal contents and ignore anything
+                # after the closing quote (e.g. a trailing inline comment).
+                if _val[:1] in ("'", '"'):
+                    _q = _val[0]
+                    _end = _val.find(_q, 1)
+                    _val = _val[1:_end] if _end != -1 else _val[1:]
+                else:
+                    # Unquoted: strip an inline comment — '#' preceded by
+                    # whitespace (dotenv semantics). A '#' with no preceding
+                    # space (e.g. inside a password/token) is kept.
+                    _c = re.search(r"\s#", _val)
+                    if _c:
+                        _val = _val[:_c.start()]
+                    _val = _val.strip()
                 os.environ.setdefault(_key, _val)
     except FileNotFoundError:
         logger.warning("No .env file found at %s", path)

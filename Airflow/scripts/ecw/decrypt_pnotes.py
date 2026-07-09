@@ -101,10 +101,11 @@ def build_engine(db_type: str, db_host: str, db_user: str, db_pass: str, schema:
     from urllib.parse import quote_plus
     if db_type == "mssql":
         port = db_port or int(os.environ.get("MSSQL_PORT", 1433))
+        odbc_driver = os.environ.get("ODBC_DRIVER", "ODBC Driver 17 for SQL Server").replace(" ", "+")
         url = (
             f"mssql+pyodbc://{quote_plus(db_user)}:{quote_plus(db_pass)}"
             f"@{db_host}:{port}/{schema}"
-            "?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes"
+            f"?driver={odbc_driver}&TrustServerCertificate=yes"
         )
     else:
         port = db_port or int(os.environ.get("MYSQL_PORT", 3306))
