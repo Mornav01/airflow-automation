@@ -58,7 +58,11 @@ _DEID_BASE_NAME    = os.environ.get("DEID_BASE_NAME", "deidentified")
 _DEID_STAGING_NAME = os.environ.get("DEID_STAGING_NAME", "deidentified_staging")
 _DEID_MERGED_NAME  = os.environ.get("DEID_MERGED_NAME", "deidentified_merged")
 
-_ODBC = "?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes"
+# ODBC driver name — configurable per machine (installs vary: Driver 17 vs 18).
+# Set ODBC_DRIVER in .env to override; spaces are URL-encoded to '+' for the
+# pyodbc/SQLAlchemy query string. `odbcinst -q -d` lists installed drivers.
+_ODBC_DRIVER = os.environ.get("ODBC_DRIVER", "ODBC Driver 17 for SQL Server")
+_ODBC = f"?driver={_ODBC_DRIVER.replace(' ', '+')}&TrustServerCertificate=yes"
 
 # ── State directory ─────────────────────────────────────────────
 STATE_DIR     = os.environ["STATE_DIR"]
