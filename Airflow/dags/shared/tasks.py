@@ -369,6 +369,7 @@ def make_pii_data(scripts_dir: str):
             _deid_python(), script,
             "--master_schema",  params["master_schema"],
             "--staging_schema", params["staging_schema"],
+            "--mapping_schema", params["mapping_schema"],
             "--state_file",     _PII_STATE_FILE,
         ]
         rc, out = _run_streaming(cmd)
@@ -387,6 +388,7 @@ def make_master_insurance(scripts_dir: str):
             _deid_python(), script,
             "--master_schema",  params["master_schema"],
             "--staging_schema", params["staging_schema"],
+            "--mapping_schema", params["mapping_schema"],
             "--state_file",     _MASTER_STATE_FILE,
         ]
         rc, out = _run_streaming(cmd)
