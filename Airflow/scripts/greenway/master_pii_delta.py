@@ -1,14 +1,21 @@
 #!/usr/bin/env python
 """
-Master PII Delta Script
+Master PII Delta Script  (new master_pg structure — Greenway / PrimeSUITE)
 
-This script updates the PII master table (pii_data_table) in the given master schema
-using deltas from the staging schema.
+Updates the PII master table (pii_data_table) in the given master schema using
+deltas from the staging schema.
 
-It is a .py version of NOTEBOOK/MIND/master_pii_delta.ipynb.
+New master_pg structure: pii_data_table is keyed on nd_patient_id (join key) with
+patientid retained (person_id is kept as a normal PII/reference column). This script
+resolves each source patient_id → nd_patient_id via patient_mapping_table in
+--mapping_schema, then writes with a single INSERT ... ON DUPLICATE KEY UPDATE keyed
+on uq_nd_patient_id. NULL source values never overwrite an existing value (COALESCE).
+
+Staging is MSSQL (Greenway/PrimeSUITE); master and mapping (dest) schemas are MySQL.
 
 Usage:
-    python master_pii_delta.py --master_schema "master" --staging_schema "Primerecord_diff_staging"
+    python master_pii_delta.py --master_schema "master_pg" \
+        --staging_schema "Primerecord_diff_staging" --mapping_schema "mapping_pg"
 """
 
 import argparse
@@ -39,20 +46,30 @@ logger = logging.getLogger(__name__)
 
 
 def create_mysql_engine(schema: str):
-    """Create SQLAlchemy engine for a MySQL schema."""
+    """MySQL engine for master / mapping schemas (always MySQL)."""
     url = f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASS}@{MYSQL_HOST}:{MYSQL_PORT}/{schema}"
     return create_engine(url, pool_recycle=3600, pool_pre_ping=True)
 
 
 def create_mssql_engine(schema: str):
-    """Create SQLAlchemy engine for an MSSQL schema (staging)."""
+    """MSSQL engine for the Greenway/PrimeSUITE staging source."""
     url = f"mssql+pymssql://{MSSQL_USER}:{MSSQL_PASS}@{MSSQL_HOST}:{MSSQL_PORT}/{schema}"
     return create_engine(url, pool_recycle=3600, pool_pre_ping=True)
 
 
-# Column names must exactly match the SELECT aliases in the source query below.
-ALL_PII_COLUMNS = [
-    "patient_id",
+def load_patient_map(mapping_schema: str) -> dict:
+    """Return {patientid (raw source id) → nd_patient_id} from patient_mapping_table."""
+    engine = create_mysql_engine(mapping_schema)
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("SELECT patientid, nd_patient_id FROM patient_mapping_table")
+        ).fetchall()
+    return {row[0]: row[1] for row in rows}
+
+
+# Value columns stored in pii_data_table (patient_id resolves nd_patient_id and is
+# kept as `patientid`; everything else — including person_id — is a value column).
+PII_VALUE_COLUMNS = [
     "person_id",
     "Patient_AltPatientID",
     "Patient_OrgPatientID",
@@ -101,36 +118,30 @@ ALL_PII_COLUMNS = [
     "BILLING_FaxNumber",
 ]
 
+# Order of columns returned by the source SELECT below (patient_id first).
+SOURCE_COLUMNS = ["patient_id"] + PII_VALUE_COLUMNS
 
-def run_master_pii_delta(master_schema: str, staging_schema: str, state_file: str = ""):
+
+def run_master_pii_delta(master_schema: str, staging_schema: str, mapping_schema: str, state_file: str = ""):
     """
-    Apply delta updates to pii_data_table in master_schema from staging_schema.
+    Apply delta updates to pii_data_table in master_schema from staging_schema,
+    keyed on nd_patient_id resolved via mapping_schema.
     """
     logger.info(
-        "Starting master PII delta: master_schema=%s, staging_schema=%s",
+        "Starting master PII delta: master_schema=%s, staging_schema=%s, mapping_schema=%s",
         master_schema,
         staging_schema,
+        mapping_schema,
     )
 
-    # Engines — staging is MSSQL (Greenway/PrimeSUITE), master is MySQL
-    old_engine = create_mysql_engine(master_schema)
     source_engine = create_mssql_engine(staging_schema)
     dest_engine = create_mysql_engine(master_schema)
 
     # -------------------------------------------------------------------------
-    # Load existing PII patient IDs from master
+    # Load patient_id → nd_patient_id map
     # -------------------------------------------------------------------------
-    logger.info("Loading existing patient_ids from %s.pii_data_table", master_schema)
-    with old_engine.connect() as conn:
-        result = conn.execute(text("SELECT DISTINCT patient_id FROM pii_data_table"))
-        pii_data = result.fetchall()
-
-    existing_patient_ids = {row[0] for row in pii_data}
-    logger.info(
-        "Existing PII rows: %d unique patient IDs: %d",
-        len(pii_data),
-        len(existing_patient_ids),
-    )
+    patient_map = load_patient_map(mapping_schema)
+    logger.info("Loaded %d patient_id → nd_patient_id mappings", len(patient_map))
 
     # -------------------------------------------------------------------------
     # Load all PII data from staging via single combined query (MSSQL)
@@ -204,62 +215,65 @@ def run_master_pii_delta(master_schema: str, staging_schema: str, state_file: st
     logger.info("Loaded %d source PII rows", len(source_rows))
 
     # -------------------------------------------------------------------------
-    # Build combined source data keyed by patient_id
-    # Each patient may appear multiple times (multiple employers/addresses) —
-    # last row wins; extend this if you need multi-row merge logic.
+    # Build combined source data keyed by patient_id (one row per patient — last
+    # row wins), then resolve nd_patient_id.
     # -------------------------------------------------------------------------
     combined_source_data: dict[int, dict] = {}
     for row in source_rows:
-        record = dict(zip(ALL_PII_COLUMNS, row))
-        patient_id = record["patient_id"]
-        combined_source_data[patient_id] = record
+        record = dict(zip(SOURCE_COLUMNS, row))
+        combined_source_data[record["patient_id"]] = record
 
-    data_for_insert = []
-    data_for_update = []
-
+    data_for_upsert = []
+    unmapped = 0
     for patient_id, record in combined_source_data.items():
-        if patient_id in existing_patient_ids:
-            data_for_update.append(record)
-        else:
-            data_for_insert.append(record)
+        nd_patient_id = patient_map.get(patient_id)
+        if nd_patient_id is None:
+            unmapped += 1
+            continue
+        record = dict(record)
+        record.pop("patient_id", None)
+        data_for_upsert.append({"nd_patient_id": nd_patient_id, "patientid": patient_id, **record})
 
     logger.info(
-        "Combined records: %d, INSERT: %d, UPDATE: %d",
+        "Combined source patients: %d, resolved: %d, unmapped (skipped): %d",
         len(combined_source_data),
-        len(data_for_insert),
-        len(data_for_update),
+        len(data_for_upsert),
+        unmapped,
     )
+    if unmapped:
+        logger.warning(
+            "%d source patients had no nd_patient_id mapping and were skipped. "
+            "Run mapping_delta before master_pii_delta so every patient is mapped.",
+            unmapped,
+        )
 
     # -------------------------------------------------------------------------
-    # Execute inserts and updates on pii_data_table
+    # Upsert into pii_data_table (keyed on uq_nd_patient_id)
     # -------------------------------------------------------------------------
-    if data_for_insert:
-        cols = ", ".join(f"`{k}`" for k in ALL_PII_COLUMNS)
-        params = ", ".join(f":{k}" for k in ALL_PII_COLUMNS)
+    if data_for_upsert:
+        value_cols = ["patientid"] + PII_VALUE_COLUMNS
+        all_cols = ["nd_patient_id"] + value_cols
+        cols = ", ".join(f"`{k}`" for k in all_cols)
+        params = ", ".join(f":{k}" for k in all_cols)
+        updates = ", ".join(
+            f"`{k}` = COALESCE(VALUES(`{k}`), `{k}`)" for k in value_cols
+        )
 
-        insert_query = text(
-            f"INSERT INTO pii_data_table ({cols}) VALUES ({params})"
+        upsert_query = text(
+            f"""
+        INSERT INTO pii_data_table ({cols})
+        VALUES ({params})
+        ON DUPLICATE KEY UPDATE {updates}
+        """
         )
 
         with dest_engine.begin() as conn:
             conn.execute(text("SET SESSION sql_mode = '';"))
-            conn.execute(insert_query, data_for_insert)
+            conn.execute(upsert_query, data_for_upsert)
 
-        logger.info("Inserted %d new PII records", len(data_for_insert))
-
-    if data_for_update:
-        set_clauses = [f"`{k}` = :{k}" for k in ALL_PII_COLUMNS if k != "patient_id"]
-        set_clause_str = ", ".join(set_clauses)
-
-        update_query = text(
-            f"UPDATE pii_data_table SET {set_clause_str} WHERE patient_id = :patient_id"
-        )
-
-        with dest_engine.begin() as conn:
-            conn.execute(text("SET SESSION sql_mode = '';"))
-            conn.execute(update_query, data_for_update)
-
-        logger.info("Updated %d existing PII records", len(data_for_update))
+        logger.info("Upserted %d PII records", len(data_for_upsert))
+    else:
+        logger.info("No PII records to upsert")
 
     logger.info("Master PII delta processing complete")
 
@@ -277,12 +291,17 @@ def main():
     parser.add_argument(
         "--master_schema",
         required=True,
-        help="Master schema name (e.g. 'master')",
+        help="Master schema name (e.g. 'master_pg')",
     )
     parser.add_argument(
         "--staging_schema",
         required=True,
         help="Staging schema name (e.g. 'Primerecord_diff_staging')",
+    )
+    parser.add_argument(
+        "--mapping_schema",
+        required=True,
+        help="Mapping schema name for nd_patient_id resolution (e.g. 'mapping_pg')",
     )
     parser.add_argument(
         "--state_file",
@@ -295,6 +314,7 @@ def main():
     run_master_pii_delta(
         master_schema=args.master_schema,
         staging_schema=args.staging_schema,
+        mapping_schema=args.mapping_schema,
         state_file=args.state_file,
     )
 

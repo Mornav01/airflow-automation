@@ -1,17 +1,32 @@
 #!/usr/bin/env python
 """
-Mapping Delta Script
+Mapping Delta Script  (new mapping_pg structure — Greenway / PrimeSUITE)
 
 This script applies patient and encounter mapping deltas into the mapping schema.
-It is a .py version of NOTEBOOK/MIND/mapping_delta.ipynb.
 
 It:
 - Reads existing patient/encounter mappings from mapping_schema
-- Reads source patients/encounters from staging_schema
-- Inserts/updates patient_mapping_table and encounter_mapping_table
+- Reads source patients/encounters from staging_schema (MSSQL — true delta)
+- Inserts/updates patient_mapping_table and encounter_mapping_table, with
+  nd_ActiveFlag soft-delete on encounter transfer between patients.
+
+Schema (new mapping_pg structure — see mapping_migration_to_new_structure_greenway.sql):
+  patient_mapping_table(nd_patient_id PK, patientid UNIQUE, offset,
+                        registration_date, reference_mapping, created_at, updated_at)
+  encounter_mapping_table(id PK AI, nd_patient_id, encounter_id, nd_encounter_id UNIQUE,
+                          encounter_date, nd_ActiveFlag, created_at, updated_at, patientid)
+
+Notes vs the old `mapping` structure:
+  - patient_id (INT) → patientid (BIGINT); nd_patient_id is a plain BIGINT (no
+    AUTO_INCREMENT) assigned as MAX(nd_patient_id)+1.
+  - encounters link to patients via the nd_patient_id bridge; patientid is kept
+    denormalised on the encounter row.
+  - reference_mapping is RETAINED (holds PersonID) — the de-id REFERENCE_PID path
+    reads patient_mapping_table.reference_mapping to resolve reference PIDs.
+  - created_by / updated_by are gone.
 
 Usage:
-    python mapping_delta.py --mapping_schema "mapping" --staging_schema "Primerecord_diff_staging"
+    python mapping_delta.py --mapping_schema "mapping_pg" --staging_schema "Primerecord_diff_staging"
 """
 
 import argparse
@@ -19,7 +34,6 @@ import json
 import logging
 import os
 import random
-import pandas as pd
 from collections import defaultdict
 from datetime import datetime, timezone
 
@@ -27,10 +41,9 @@ from sqlalchemy import (
     BigInteger,
     Column,
     DATETIME,
+    CHAR,
     Integer,
     MetaData,
-    Numeric,
-    String,
     Table,
     UniqueConstraint,
     Index,
@@ -61,36 +74,15 @@ logger = logging.getLogger(__name__)
 
 
 def create_mysql_engine(schema: str):
-    """Create SQLAlchemy engine for a MySQL schema."""
+    """MySQL engine for mapping schema (always MySQL)."""
     url = f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASS}@{MYSQL_HOST}:{MYSQL_PORT}/{schema}"
-    return create_engine(url, pool_recycle=3600, pool_pre_ping=True)
+    return create_engine(url, pool_recycle=3600, pool_pre_ping=True, connect_args={"init_command": "SET sql_mode=''"})
 
 
 def create_mssql_engine(schema: str):
-    """Create SQLAlchemy engine for an MSSQL schema (staging)."""
+    """MSSQL engine for the Greenway/PrimeSUITE staging source."""
     url = f"mssql+pymssql://{MSSQL_USER}:{MSSQL_PASS}@{MSSQL_HOST}:{MSSQL_PORT}/{schema}"
     return create_engine(url, pool_recycle=3600, pool_pre_ping=True)
-
-
-def ensure_active_flag_column(engine):
-    with engine.connect() as conn:
-        result = conn.execute(text("""
-            SELECT COUNT(*) AS cnt
-            FROM information_schema.COLUMNS
-            WHERE TABLE_SCHEMA = DATABASE()
-              AND TABLE_NAME = 'encounter_mapping_table'
-              AND COLUMN_NAME = 'nd_ActiveFlag'
-        """))
-        if result.scalar() == 0:
-            conn.execute(text("""
-                ALTER TABLE encounter_mapping_table
-                ADD COLUMN nd_ActiveFlag CHAR(1) NOT NULL DEFAULT 'Y'
-            """))
-            conn.execute(text("UPDATE encounter_mapping_table SET nd_ActiveFlag = 'Y'"))
-            conn.commit()
-            logger.info("nd_ActiveFlag column added and initialized to 'Y'")
-        else:
-            logger.info("nd_ActiveFlag column already exists")
 
 
 def run_mapping_delta(mapping_schema: str, staging_schema: str, state_file: str = ""):
@@ -106,167 +98,139 @@ def run_mapping_delta(mapping_schema: str, staging_schema: str, state_file: str 
     )
 
     # Engines — staging is MSSQL (Greenway/PrimeSUITE), mapping is MySQL
-    old_engine = create_mysql_engine(mapping_schema)
     source_engine = create_mssql_engine(staging_schema)
-    dest_engine = create_mysql_engine(mapping_schema)
-
-    # Ensure nd_ActiveFlag exists before any SELECT touches it
-    ensure_active_flag_column(dest_engine)
+    dest_engine = create_mysql_engine(mapping_schema)  # read + write mappings
 
     metadata = MetaData()
 
     # -------------------------------------------------------------------------
-    # Load existing mapping data from mapping_schema
-    # -------------------------------------------------------------------------
-    logger.info("Loading existing mapping data from %s", mapping_schema)
-    with old_engine.connect() as conn:
-        old_query = text(
-            """
-    SELECT DISTINCT
-        a.patient_id,
-        a.nd_patient_id,
-        a.offset,
-        b.encounter_id,
-        b.nd_encounter_id,
-        b.created_by,
-        b.created_at,
-        b.updated_by,
-        b.updated_at,
-        b.nd_ActiveFlag
-    FROM patient_mapping_table AS a
-    LEFT JOIN encounter_mapping_table AS b
-        ON a.patient_id = b.patient_id
-    """
-        )
-        result = conn.execute(old_query)
-        old_data = result.fetchall()
-
-    logger.info("Loaded %d existing mapping rows", len(old_data))
-
-    old_pat_ids: dict[int, list] = {}
-    old_pat_encids: dict[int, dict] = defaultdict(dict)
-    old_enc_to_patient: dict[int, int] = {}  # encounter_id → patient_id (active only, for transfer detection)
-    old_created_by = None
-    old_created_at = None
-    old_updated_by = None
-    old_updated_at = None
-
-    last_patid = 0
-
-    for row in old_data:
-        # created/updated metadata from encounter rows if present
-        if row[5]:
-            old_created_by = row[5]
-            old_created_at = row[6]
-            old_updated_by = row[7]
-            old_updated_at = row[8]
-
-        # Track max nd_patient_id
-        if row[1] > last_patid:
-            last_patid = row[1]
-
-        # patient_id → [nd_patient_id, offset]
-        old_pat_ids[row[0]] = [row[1], row[2]]
-
-        # encounter mapping
-        if row[3]:
-            if (
-                "last_encid" not in old_pat_encids[row[0]]
-                or row[4] > old_pat_encids[row[0]]["last_encid"]
-            ):
-                old_pat_encids[row[0]]["last_encid"] = row[4]
-
-            old_pat_encids[row[0]][row[3]] = row[4]
-
-            # Build reverse map for active encounters (used for transfer detection)
-            if row[10] == 'Y':
-                old_enc_to_patient[row[3]] = row[0]
-
-    logger.info(
-        "Existing patient mappings: %d, encounter mappings: %d, last_patid=%s, "
-        "created_by=%s, created_at=%s, updated_by=%s, updated_at=%s",
-        len(old_pat_ids),
-        len(old_pat_encids),
-        last_patid,
-        old_created_by,
-        old_created_at,
-        old_updated_by,
-        old_updated_at,
-    )
-
-    # -------------------------------------------------------------------------
-    # Load delta data from staging_schema
-    # -------------------------------------------------------------------------
-    logger.info(f"Loading delta patients from Patient and br_Account tables from {staging_schema}")
-    with source_engine.connect() as conn:
-        query = text(
-            f"""
-        select p.PatientID, acc.AcctOpenDate, p.PersonID 
-        from Patient as p
-        left join br_Account as acc
-        on p.PatientID = acc.PatientID
-        order by 1, 2
-        """
-        )
-        result = conn.execute(query)
-        users_data = result.fetchall()
-
-    logger.info("Loaded %d user registration rows", len(users_data))
-
-    logger.info(f"Loading delta encounters from Visit table from {staging_schema}")
-    with source_engine.connect() as conn:
-        query = text(
-            f"""
-        select v.PatientID, v.CreateDate, v.VisitID
-        from Visit as v
-        order by 1, 2, 3
-        """
-        )
-        result = conn.execute(query)
-        enc_data = result.fetchall()
-
-    logger.info("Loaded %d encounter rows", len(enc_data))
-
-    # -------------------------------------------------------------------------
-    # Ensure mapping tables exist in mapping_schema
+    # Ensure mapping tables exist in mapping_schema (new mapping_pg structure).
+    # create_all only creates tables that are missing, so on an already-migrated
+    # schema this is a no-op and the definitions below simply document the shape.
     # -------------------------------------------------------------------------
     patient_mapping_table = Table(
         "patient_mapping_table",
         metadata,
-        Column("nd_patient_id", BigInteger, primary_key=True, autoincrement=True),
-        Column("patient_id", Integer, nullable=False),
+        Column("nd_patient_id", BigInteger, primary_key=True, autoincrement=False),
+        Column("patientid", BigInteger, nullable=False),
         Column("offset", Integer, nullable=False),
         Column("registration_date", DATETIME, nullable=True),
-        Column("reference_mapping", Integer, nullable=True),
-        Column("created_by", String(50), nullable=False),
+        Column("reference_mapping", BigInteger, nullable=True),
         Column("created_at", DATETIME, nullable=False),
-        Column("updated_by", String(50), nullable=False),
         Column("updated_at", DATETIME, nullable=False),
-        UniqueConstraint("patient_id", name="uq_patient_id"),
-        Index("ix_patient_id", "patient_id"),
+        UniqueConstraint("patientid", name="uq_patientid"),
+        Index("idx_patientid", "patientid"),
+        Index("idx_reference_mapping", "reference_mapping"),
     )
 
     encounter_mapping_table = Table(
         "encounter_mapping_table",
         metadata,
-        Column("id", Integer, primary_key=True, autoincrement=True),
-        Column("patient_id", Integer, nullable=False),
-        Column("encounter_id", Integer, nullable=False),
-        Column("nd_encounter_id", Numeric(20, 0), nullable=False),
+        Column("id", BigInteger, primary_key=True, autoincrement=True),
+        Column("nd_patient_id", BigInteger, nullable=False),
+        Column("encounter_id", BigInteger, nullable=False),
+        Column("nd_encounter_id", BigInteger, nullable=False),
         Column("encounter_date", DATETIME, nullable=True),
-        Column("created_by", String(50), nullable=False),
+        Column("nd_ActiveFlag", CHAR(1), nullable=False, server_default="Y"),
         Column("created_at", DATETIME, nullable=False),
-        Column("updated_by", String(50), nullable=False),
         Column("updated_at", DATETIME, nullable=False),
-        Column("nd_ActiveFlag", String(1), nullable=False, server_default="Y"),
+        Column("patientid", BigInteger, nullable=False),
         UniqueConstraint("nd_encounter_id", name="uq_nd_encounter_id"),
-        Index("ix_patient_id", "patient_id"),
+        Index("idx_nd_patient_id", "nd_patient_id"),
+        Index("idx_source_id", "encounter_id"),
     )
 
     metadata.create_all(dest_engine)
     logger.info("Ensured patient_mapping_table and encounter_mapping_table exist")
 
-    run_ts = datetime.now(timezone.utc)   # single timestamp for the entire run
+    # -------------------------------------------------------------------------
+    # Load existing mapping data from mapping_schema
+    #   patient  : patientid → [nd_patient_id, offset]
+    #   encounter: patientid → {encounter_id: nd_encounter_id, "last_encid": max}
+    #   reverse  : encounter_id → owning patientid (ACTIVE rows only, for transfer)
+    # -------------------------------------------------------------------------
+    logger.info("Loading existing mapping data from %s", mapping_schema)
+    with dest_engine.connect() as conn:
+        pat_rows = conn.execute(
+            text("SELECT patientid, nd_patient_id, `offset` FROM patient_mapping_table")
+        ).fetchall()
+        enc_rows = conn.execute(
+            text(
+                "SELECT patientid, encounter_id, nd_encounter_id, nd_ActiveFlag "
+                "FROM encounter_mapping_table"
+            )
+        ).fetchall()
+
+    old_pat_ids: dict[int, list] = {}
+    old_pat_encids: dict[int, dict] = defaultdict(dict)
+    encounter_id_to_patient: dict[int, int] = {}  # encounter_id → patientid (active only)
+    last_patid = 0
+
+    for patientid, nd_patient_id, offset in pat_rows:
+        old_pat_ids[patientid] = [nd_patient_id, offset]
+        if nd_patient_id > last_patid:
+            last_patid = nd_patient_id
+
+    for patientid, encounter_id, nd_encounter_id, nd_active_flag in enc_rows:
+        if nd_encounter_id is None:
+            continue
+        enc_map = old_pat_encids[patientid]
+        if "last_encid" not in enc_map or nd_encounter_id > enc_map["last_encid"]:
+            enc_map["last_encid"] = nd_encounter_id
+        enc_map[encounter_id] = nd_encounter_id
+        if nd_active_flag == "Y":
+            encounter_id_to_patient[encounter_id] = patientid
+
+    logger.info(
+        "Existing patient mappings: %d, encounter mappings: %d, last_patid=%s",
+        len(old_pat_ids), len(old_pat_encids), last_patid,
+    )
+
+    # -------------------------------------------------------------------------
+    # Load delta data from staging_schema (MSSQL)
+    #   Patient.PatientID   → patientid ; Patient.PersonID → reference_mapping
+    #   br_Account.AcctOpenDate → registration_date
+    #   Visit.VisitID       → encounter_id
+    # -------------------------------------------------------------------------
+    logger.info("Loading delta patients from Patient / br_Account in %s", staging_schema)
+    with source_engine.connect() as conn:
+        users_data = conn.execute(
+            text(
+                """
+        select p.PatientID, acc.AcctOpenDate, p.PersonID
+        from Patient as p
+        left join br_Account as acc
+        on p.PatientID = acc.PatientID
+        order by 1, 2
+        """
+            )
+        ).fetchall()
+
+    logger.info("Loaded %d patient rows", len(users_data))
+
+    logger.info("Loading delta encounters from Visit in %s", staging_schema)
+    with source_engine.connect() as conn:
+        enc_data = conn.execute(
+            text(
+                """
+        select v.PatientID, v.CreateDate, v.VisitID
+        from Visit as v
+        order by 1, 2, 3
+        """
+            )
+        ).fetchall()
+
+    logger.info("Loaded %d encounter rows", len(enc_data))
+
+    # DB-authoritative MAX to handle deleted rows or out-of-band inserts.
+    with dest_engine.connect() as conn:
+        db_last_patid = conn.execute(
+            text("SELECT COALESCE(MAX(nd_patient_id), 0) FROM patient_mapping_table")
+        ).scalar() or 0
+    last_patid = max(last_patid, int(db_last_patid))
+    logger.info("DB-authoritative last_patid=%d", last_patid)
+
+    run_ts = datetime.now(timezone.utc)  # single timestamp for the entire run
 
     # -------------------------------------------------------------------------
     # STEP 1: Process & upsert delta patients
@@ -280,9 +244,9 @@ def run_mapping_delta(mapping_schema: str, staging_schema: str, state_file: str 
         patients_to_insert = []
         patients_to_update = []
 
-        for patient_id, registration_date, reference_id in users_data:
+        for patientid, registration_date, reference_id in users_data:
             # New patient: not in history and not yet processed in this run
-            if patient_id not in old_pat_ids and patient_id not in existing_patient_ids:
+            if patientid not in old_pat_ids and patientid not in existing_patient_ids:
                 offset = random.choice(possible_offsets)
                 last_patid += 1
                 nd_patient_id = last_patid
@@ -290,25 +254,22 @@ def run_mapping_delta(mapping_schema: str, staging_schema: str, state_file: str 
                 patients_to_insert.append(
                     {
                         "nd_patient_id": nd_patient_id,
-                        "patient_id": patient_id,
+                        "patientid": patientid,
                         "offset": offset,
                         "registration_date": registration_date,
                         "reference_mapping": reference_id,
-                        "created_by": "nd-admin",
                         "created_at": run_ts,
-                        "updated_by": "nd-admin",
                         "updated_at": run_ts,
                     }
                 )
 
-                # Update in-memory map for use in Step 2 (Encounters)
-                existing_patient_ids[patient_id] = [nd_patient_id, offset]
+                existing_patient_ids[patientid] = [nd_patient_id, offset]
             else:
                 patients_to_update.append(
                     {
-                        "patient_id": patient_id,
+                        "patientid": patientid,
                         "registration_date": registration_date,
-                        "updated_by": "nd-admin",
+                        "reference_mapping": reference_id,
                         "updated_at": run_ts,
                     }
                 )
@@ -332,14 +293,12 @@ def run_mapping_delta(mapping_schema: str, staging_schema: str, state_file: str 
                         stmt = (
                             update(patient_mapping_table)
                             .where(
-                                patient_mapping_table.c.patient_id == bindparam(
-                                    "b_pid"
-                                )
+                                patient_mapping_table.c.patientid == bindparam("b_pid")
                             )
                             .values(
                                 {
                                     "registration_date": bindparam("b_reg_date"),
-                                    "updated_by": bindparam("b_user"),
+                                    "reference_mapping": bindparam("b_ref"),
                                     "updated_at": bindparam("b_ts"),
                                 }
                             )
@@ -347,9 +306,9 @@ def run_mapping_delta(mapping_schema: str, staging_schema: str, state_file: str 
 
                         bulk_params = [
                             {
-                                "b_pid": d["patient_id"],
+                                "b_pid": d["patientid"],
                                 "b_reg_date": d["registration_date"],
-                                "b_user": d["updated_by"],
+                                "b_ref": d["reference_mapping"],
                                 "b_ts": d["updated_at"],
                             }
                             for d in patients_to_update
@@ -374,126 +333,113 @@ def run_mapping_delta(mapping_schema: str, staging_schema: str, state_file: str 
     if enc_data:
         encounters_to_insert = []
         encounters_to_update = []
-        encounters_to_deactivate = []
+        deactivate_encounters: list[tuple[int, int]] = []  # (old_patientid, encounter_id)
 
-        # Build a set of ALL nd_encounter_ids already in use (from history) to prevent duplicates
         used_nd_encounter_ids = set()
-        for pid, enc_map in old_pat_encids.items():
+        for enc_map in old_pat_encids.values():
             for k, v in enc_map.items():
-                if k != 'last_encid' and v:
+                if k != "last_encid" and v:
                     used_nd_encounter_ids.add(int(v))
 
-        # 1. Prepare data for INSERT or UPDATE
-        for patient_id, encounter_date, mind_encounter_id in enc_data:
-            # --- FIX 1: CLEAR ALL VARIABLES AT START OF LOOP ---
-            target_nd_patient_id = None
-            hist = None
-
-            # Unified lookup for the patient mapping
-            patient_info = old_pat_ids.get(patient_id) or existing_patient_ids.get(patient_id)
+        for patientid, encounter_date, mind_encounter_id in enc_data:
+            patient_info = old_pat_ids.get(patientid) or existing_patient_ids.get(patientid)
 
             if patient_info:
                 target_nd_patient_id = patient_info[0]
             else:
-                # If we can't find the patient, skip immediately to avoid ghosting
-                continue
-            
-            # TRANSFER CHECK: encounter exists in mapping but under a different patient
-            existing_patient = old_enc_to_patient.get(mind_encounter_id)
-            if existing_patient is not None and existing_patient != patient_id:
-                logger.info(
-                    "Encounter %s transferring from patient %s to %s — marking old record inactive",
-                    mind_encounter_id, existing_patient, patient_id,
+                logger.warning(
+                    "No patient mapping found for patientid=%s; skipping encounter_id=%s",
+                    patientid,
+                    mind_encounter_id,
                 )
-                encounters_to_deactivate.append({
-                    "b_pid": existing_patient,
-                    "b_enc_id": mind_encounter_id,
-                    "b_updated_by": "nd-admin",
-                    "b_updated_at": run_ts,
-                })
-                del old_enc_to_patient[mind_encounter_id]
-                old_pat_encids.get(existing_patient, {}).pop(mind_encounter_id, None)
-                # Fall through to INSERT logic below
-
-            # DELTA CHECK: encounter already exists in history
-            hist = old_pat_encids.get(patient_id)
-            if hist and mind_encounter_id in hist:
-                # --- UPDATE LOGIC ---
-                
-                encounters_to_update.append({
-                    'encounter_id': mind_encounter_id, # Key for WHERE clause
-                    'encounter_date': encounter_date,
-                    'updated_by': 'nd-admin',
-                    'updated_at': run_ts
-                })
                 continue
 
-            # 2. Generate New nd_encounter_id
-            
-            # Get the last known nd_encounter_id for this patient (historical or run-time)
-            last_encid_hist = hist['last_encid'] if hist else 0
-            last_encid_run = patient_encounters.get(patient_id, 0)
+            # TRANSFER CHECK: encounter active under a different patient → deactivate old row
+            existing_owner = encounter_id_to_patient.get(mind_encounter_id)
+            if existing_owner is not None and existing_owner != patientid:
+                logger.info(
+                    "Encounter %s transferring from patient %s to %s — marking old record inactive.",
+                    mind_encounter_id, existing_owner, patientid,
+                )
+                deactivate_encounters.append((existing_owner, mind_encounter_id))
+                encounter_id_to_patient[mind_encounter_id] = patientid
+                owner_hist = old_pat_encids.get(existing_owner, {})
+                if mind_encounter_id in owner_hist:
+                    del owner_hist[mind_encounter_id]
+                # Fall through to INSERT for the new patient
 
+            # DELTA CHECK: encounter already exists in history for this patient → UPDATE date
+            hist = old_pat_encids.get(patientid)
+            if hist and mind_encounter_id in hist:
+                encounters_to_update.append(
+                    {
+                        "patientid": patientid,
+                        "encounter_id": mind_encounter_id,
+                        "encounter_date": encounter_date,
+                        "updated_at": run_ts,
+                    }
+                )
+                continue
+
+            # 2. Generate a new nd_encounter_id
+            last_encid_hist = hist["last_encid"] if hist else 0
+            last_encid_run = patient_encounters.get(patientid, 0)
             max_last_encid = max(last_encid_hist, last_encid_run)
 
             if max_last_encid > 0:
-                # Case A: History or current run has generated IDs, increment from the max
                 nd_encounter_id = max_last_encid + 1
             else:
-                # Case B: First encounter for this patient (either entirely new)
-                # Use the base formula
                 nd_encounter_id = (target_nd_patient_id * 10000) + 1
 
-            # FIX: Ensure nd_encounter_id is globally unique (avoids duplicate key when different
-            # patients share same nd_patient_id or when IDs collide across batch)
             while nd_encounter_id in used_nd_encounter_ids:
                 nd_encounter_id += 1
             used_nd_encounter_ids.add(nd_encounter_id)
-            
-            # Update the run-time tracker
-            patient_encounters[patient_id] = nd_encounter_id
 
-            # Prepare for insertion
-            encounters_to_insert.append({
-                'patient_id': patient_id,
-                'encounter_id': mind_encounter_id,
-                'nd_encounter_id': nd_encounter_id,
-                'encounter_date': encounter_date,
-                'nd_ActiveFlag': 'Y',
-                'created_by': 'nd-admin',
-                'created_at': run_ts,
-                'updated_by': 'nd-admin',
-                'updated_at': run_ts
-            })
+            patient_encounters[patientid] = nd_encounter_id
+
+            encounters_to_insert.append(
+                {
+                    "nd_patient_id": target_nd_patient_id,
+                    "patientid": patientid,
+                    "encounter_id": mind_encounter_id,
+                    "nd_encounter_id": nd_encounter_id,
+                    "encounter_date": encounter_date,
+                    "nd_ActiveFlag": "Y",
+                    "created_at": run_ts,
+                    "updated_at": run_ts,
+                }
+            )
 
         logger.info(
             "Encounters to insert: %d, to update: %d, to deactivate: %d",
             len(encounters_to_insert),
             len(encounters_to_update),
-            len(encounters_to_deactivate),
+            len(deactivate_encounters),
         )
 
-        if encounters_to_insert or encounters_to_update or encounters_to_deactivate:
+        if encounters_to_insert or encounters_to_update or deactivate_encounters:
             with dest_engine.connect() as conn:
                 trans = conn.begin()
                 try:
-                    if encounters_to_deactivate:
+                    if deactivate_encounters:
                         stmt = (
                             update(encounter_mapping_table)
                             .where(
-                                (encounter_mapping_table.c.patient_id == bindparam("b_pid"))
-                                & (encounter_mapping_table.c.encounter_id == bindparam("b_enc_id"))
+                                (encounter_mapping_table.c.patientid == bindparam("b_pid"))
+                                & (encounter_mapping_table.c.encounter_id == bindparam("b_eid"))
                             )
-                            .values({
-                                "nd_ActiveFlag": "N",
-                                "updated_by": bindparam("b_updated_by"),
-                                "updated_at": bindparam("b_updated_at"),
-                            })
+                            .values({"nd_ActiveFlag": "N", "updated_at": bindparam("b_ts")})
                         )
-                        conn.execute(stmt, encounters_to_deactivate)
+                        conn.execute(
+                            stmt,
+                            [
+                                {"b_pid": pid, "b_eid": eid, "b_ts": run_ts}
+                                for pid, eid in deactivate_encounters
+                            ],
+                        )
                         logger.info(
                             "Deactivated %d transferred encounter records",
-                            len(encounters_to_deactivate),
+                            len(deactivate_encounters),
                         )
 
                     if encounters_to_insert:
@@ -509,13 +455,12 @@ def run_mapping_delta(mapping_schema: str, staging_schema: str, state_file: str 
                         stmt = (
                             update(encounter_mapping_table)
                             .where(
-                                encounter_mapping_table.c.encounter_id
-                                == bindparam("b_enc_id")
+                                (encounter_mapping_table.c.encounter_id == bindparam("b_enc_id"))
+                                & (encounter_mapping_table.c.patientid == bindparam("b_pid"))
                             )
                             .values(
                                 {
                                     "encounter_date": bindparam("b_enc_date"),
-                                    "updated_by": bindparam("b_updated_by"),
                                     "updated_at": bindparam("b_updated_at"),
                                 }
                             )
@@ -524,8 +469,8 @@ def run_mapping_delta(mapping_schema: str, staging_schema: str, state_file: str 
                         bulk_update_data = [
                             {
                                 "b_enc_id": row["encounter_id"],
+                                "b_pid": row["patientid"],
                                 "b_enc_date": row["encounter_date"],
-                                "b_updated_by": row["updated_by"],
                                 "b_updated_at": row["updated_at"],
                             }
                             for row in encounters_to_update
@@ -564,7 +509,7 @@ def main():
     parser.add_argument(
         "--mapping_schema",
         required=True,
-        help="Mapping schema name (e.g. 'mapping')",
+        help="Mapping schema name (e.g. 'mapping_pg')",
     )
     parser.add_argument(
         "--staging_schema",
@@ -588,4 +533,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

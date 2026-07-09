@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from shared.notifications import default_args  # noqa: E402 — must follow sys.path insert
 from shared.tasks import (  # noqa: E402
     _SCRIPTS_DIR,
+    _run_streaming,
     make_check_db_availability,
     make_mapping_update,
     make_master_insurance,
@@ -92,15 +93,9 @@ DIFF_MERGE_TABLES_CSV        = os.environ.get("DIFF_MERGE_TABLES_CSV", "")
 
 def task_decrypt_cnotes(**_):
     script = os.path.join(_GREENWAY_SCRIPTS_DIR, "decrypt_cnotes.py")
-    result = subprocess.run([DEID_PYTHON, script], capture_output=True, text=True, env=_ENV)
-    if result.stdout:
-        logger.info(result.stdout)
-    if result.stderr:
-        logger.info(result.stderr)
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"decrypt_cnotes failed (rc={result.returncode}):\n{result.stderr or result.stdout}"
-        )
+    rc, out = _run_streaming([DEID_PYTHON, script], env=_ENV)
+    if rc != 0:
+        raise RuntimeError(f"decrypt_cnotes failed (rc={rc}):\n{out[-4000:]}")
 
 
 def task_clinicalbin_deid(**context):

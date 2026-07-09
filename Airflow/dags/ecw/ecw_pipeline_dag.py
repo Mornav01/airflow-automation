@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os
-import subprocess
 import sys
 
 import yaml
@@ -19,6 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from shared.notifications import default_args  # noqa: E402 — must follow sys.path insert
 from shared.tasks import (  # noqa: E402
     _SCRIPTS_DIR,
+    _run_streaming,
     make_check_db_availability,
     make_mapping_update,
     make_master_insurance,
@@ -103,15 +103,9 @@ def task_decrypt_pnotes(**context):
         "--staging_schema", params["staging_schema"],
         "--db_type", _PNOTES_DB_TYPE,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, env=_ENV)
-    if result.stdout:
-        logger.info(result.stdout)
-    if result.stderr:
-        logger.info(result.stderr)
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"decrypt_pnotes failed (rc={result.returncode}):\n{result.stderr or result.stdout}"
-        )
+    rc, out = _run_streaming(cmd, env=_ENV)
+    if rc != 0:
+        raise RuntimeError(f"decrypt_pnotes failed (rc={rc}):\n{out[-4000:]}")
 
 
 # ──────────────────────────────────────────────────────────────────────────────

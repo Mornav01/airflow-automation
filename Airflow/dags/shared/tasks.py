@@ -42,6 +42,34 @@ def _env() -> dict:
     return {**os.environ, "PYTHONUNBUFFERED": "1"}
 
 
+def _run_streaming(cmd, *, env: dict | None = None) -> tuple[int, str]:
+    """Run *cmd*, streaming its merged stdout+stderr to the Airflow task log
+    line by line as the child produces it (realtime), while also collecting the
+    full output.  Returns ``(returncode, output_text)``.
+
+    stderr is folded into stdout so the log ordering is chronological.  Do NOT
+    use this for commands whose stdout must be parsed separately from stderr
+    (e.g. JSON emitted on stdout) — use ``subprocess.run(capture_output=True)``
+    there so the streams stay distinct.
+    """
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,   # fold stderr in → chronological ordering
+        text=True,
+        bufsize=1,                  # line-buffered
+        env=env if env is not None else _env(),
+    )
+    lines: list[str] = []
+    assert proc.stdout is not None
+    for line in proc.stdout:        # drains the pipe as the child writes → realtime
+        line = line.rstrip("\n")
+        lines.append(line)
+        logger.info(line)
+    rc = proc.wait()
+    return rc, "\n".join(lines)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # State-file paths (constant per machine, derived from STATE_DIR in .env)
 # ──────────────────────────────────────────────────────────────────────────────
@@ -67,15 +95,9 @@ def task_run_diff_merge(**context):
         "--state_dir",   params["state_dir"],
         "--max_workers", str(params.get("diff_merge_max_workers", 8)),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, env=_env())
-    if result.stdout:
-        logger.info(result.stdout)
-    if result.stderr:
-        logger.info(result.stderr)
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"diff+merge failed (rc={result.returncode}):\n{result.stderr or result.stdout}"
-        )
+    rc, out = _run_streaming(cmd)
+    if rc != 0:
+        raise RuntimeError(f"diff+merge failed (rc={rc}):\n{out[-4000:]}")
 
 
 def task_validate_diff_merge(**context):
@@ -145,15 +167,9 @@ def task_init_deid_state(**context):
         "--tables-filepath", params["deid_tables_csv"],
         "--max-workers",     str(params.get("deid_init_max_workers", 16)),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, env=_env())
-    if result.stdout:
-        logger.info(result.stdout)
-    if result.stderr:
-        logger.info(result.stderr)
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"deid state init failed (rc={result.returncode}):\n{result.stderr or result.stdout}"
-        )
+    rc, out = _run_streaming(cmd)
+    if rc != 0:
+        raise RuntimeError(f"deid state init failed (rc={rc}):\n{out[-4000:]}")
 
 
 def task_run_deid(**context):
@@ -182,15 +198,9 @@ def task_check_deid_status(**context):
         "--tables-filepath", params["deid_post_process_tables_csv"],
         "--max-workers",     str(params.get("deid_status_max_workers", 8)),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, env=_env())
-    if result.stdout:
-        logger.info(result.stdout)
-    if result.stderr:
-        logger.info(result.stderr)
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"deid status check failed (rc={result.returncode}):\n{result.stderr or result.stdout}"
-        )
+    rc, out = _run_streaming(cmd)
+    if rc != 0:
+        raise RuntimeError(f"deid status check failed (rc={rc}):\n{out[-4000:]}")
 
 
 def task_merge_deid_data(**context):
@@ -201,15 +211,9 @@ def task_merge_deid_data(**context):
         "--tables_filepath", params["deid_post_process_tables_csv"],
         "--max_workers",     str(params.get("deid_merge_max_workers", 8)),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, env=_env())
-    if result.stdout:
-        logger.info(result.stdout)
-    if result.stderr:
-        logger.info(result.stderr)
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"deid merge failed (rc={result.returncode}):\n{result.stderr or result.stdout}"
-        )
+    rc, out = _run_streaming(cmd)
+    if rc != 0:
+        raise RuntimeError(f"deid merge failed (rc={rc}):\n{out[-4000:]}")
 
 
 def task_s3_transfer(**context):
@@ -252,15 +256,9 @@ def task_delete_diffmerged(**context):
         "--tables_filepath", params["deid_post_process_tables_csv"],
         "--max_workers",     str(params.get("deid_delete_max_workers", 8)),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, env=_env())
-    if result.stdout:
-        logger.info(result.stdout)
-    if result.stderr:
-        logger.info(result.stderr)
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"delete_diffmerged failed (rc={result.returncode}):\n{result.stderr or result.stdout}"
-        )
+    rc, out = _run_streaming(cmd)
+    if rc != 0:
+        raise RuntimeError(f"delete_diffmerged failed (rc={rc}):\n{out[-4000:]}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -281,15 +279,9 @@ def make_daily_dump(scripts_dir: str):
             return
 
         script = os.path.join(scripts_dir, "daily_dump.py")
-        result = subprocess.run([_deid_python(), script], capture_output=True, text=True, env=_env())
-        if result.stdout:
-            logger.info(result.stdout)
-        if result.stderr:
-            logger.info(result.stderr)
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"daily_dump failed (rc={result.returncode}):\n{result.stderr or result.stdout}"
-            )
+        rc, out = _run_streaming([_deid_python(), script])
+        if rc != 0:
+            raise RuntimeError(f"daily_dump failed (rc={rc}):\n{out[-4000:]}")
 
     return task_daily_dump
 
@@ -307,15 +299,9 @@ def make_check_db_availability(scripts_dir: str):
             return
 
         script = os.path.join(scripts_dir, "check_db_availability.py")
-        result = subprocess.run([_deid_python(), script], capture_output=True, text=True, env=_env())
-        if result.stdout:
-            logger.info(result.stdout)
-        if result.stderr:
-            logger.info(result.stderr)
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"db availability check failed (rc={result.returncode}):\n{result.stderr or result.stdout}"
-            )
+        rc, out = _run_streaming([_deid_python(), script])
+        if rc != 0:
+            raise RuntimeError(f"db availability check failed (rc={rc}):\n{out[-4000:]}")
 
     return task_check_db_availability
 
@@ -332,15 +318,9 @@ def make_restore(scripts_dir: str):
             return
 
         script = os.path.join(scripts_dir, "restore_incremental_logs.py")
-        result = subprocess.run([_deid_python(), script], capture_output=True, text=True, env=_env())
-        if result.stdout:
-            logger.info(result.stdout)
-        if result.stderr:
-            logger.info(result.stderr)
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"restore failed (rc={result.returncode}):\n{result.stderr or result.stdout}"
-            )
+        rc, out = _run_streaming([_deid_python(), script])
+        if rc != 0:
+            raise RuntimeError(f"restore failed (rc={rc}):\n{out[-4000:]}")
 
     return task_restore
 
@@ -356,15 +336,9 @@ def make_mapping_update(scripts_dir: str):
             "--staging_schema", params["staging_schema"],
             "--state_file",     _MAPPING_STATE_FILE,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, env=_env())
-        if result.stdout:
-            logger.info(result.stdout)
-        if result.stderr:
-            logger.info(result.stderr)
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"mapping_update failed (rc={result.returncode}):\n{result.stderr or result.stdout}"
-            )
+        rc, out = _run_streaming(cmd)
+        if rc != 0:
+            raise RuntimeError(f"mapping_update failed (rc={rc}):\n{out[-4000:]}")
 
     return task_mapping_update
 
@@ -380,15 +354,9 @@ def make_pii_data(scripts_dir: str):
             "--staging_schema", params["staging_schema"],
             "--state_file",     _PII_STATE_FILE,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, env=_env())
-        if result.stdout:
-            logger.info(result.stdout)
-        if result.stderr:
-            logger.info(result.stderr)
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"pii_data failed (rc={result.returncode}):\n{result.stderr or result.stdout}"
-            )
+        rc, out = _run_streaming(cmd)
+        if rc != 0:
+            raise RuntimeError(f"pii_data failed (rc={rc}):\n{out[-4000:]}")
 
     return task_pii_data
 
@@ -404,14 +372,8 @@ def make_master_insurance(scripts_dir: str):
             "--staging_schema", params["staging_schema"],
             "--state_file",     _MASTER_STATE_FILE,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, env=_env())
-        if result.stdout:
-            logger.info(result.stdout)
-        if result.stderr:
-            logger.info(result.stderr)
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"master_insurance failed (rc={result.returncode}):\n{result.stderr or result.stdout}"
-            )
+        rc, out = _run_streaming(cmd)
+        if rc != 0:
+            raise RuntimeError(f"master_insurance failed (rc={rc}):\n{out[-4000:]}")
 
     return task_master_insurance

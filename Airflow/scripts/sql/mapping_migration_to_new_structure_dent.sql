@@ -28,9 +28,10 @@
 --     - Removed unique keys uq_encounter_id / uq_patient_encounter_id (now plain indexes)
 --
 -- master → master_pg (pii_data_table, master_insurance_table):
---     - Re-keyed from raw patient_id to nd_patient_id (resolved via mapping),
---       matching what the de-id reader expects (pii_table.c.nd_patient_id).
---     - patient_id column dropped.
+--     - Added nd_patient_id (resolved via mapping) as the join key, matching what
+--       the de-id reader expects (pii_table.c.nd_patient_id).
+--     - patient_id RENAMED to patientid and KEPT (retained/denormalised in every
+--       mapping and master table alongside nd_patient_id).
 --     - Column-set-agnostic migration via CREATE TABLE ... LIKE so this file does
 --       not need to enumerate every PII / insurance column.
 -- =============================================================================
@@ -156,9 +157,10 @@ CREATE DATABASE IF NOT EXISTS master_pg
   COLLATE utf8mb4_0900_ai_ci;
 
 -- =============================================================================
--- SECTION 8: Migrate pii_data_table  (master → master_pg, re-keyed to nd_patient_id)
+-- SECTION 8: Migrate pii_data_table  (master → master_pg)
+--   Adds nd_patient_id as the join key and KEEPS the raw id as patientid.
 --   Column-set-agnostic: clone the old table structure, copy rows, add
---   nd_patient_id, resolve it from the mapping, then drop the raw patient_id.
+--   nd_patient_id, resolve it from the mapping, then rename patient_id → patientid.
 -- =============================================================================
 
 -- 8.1 clone structure + data (keeps whatever PII columns exist, incl. patient_id)
@@ -173,19 +175,24 @@ UPDATE master_pg.pii_data_table t
 JOIN mapping.patient_mapping_table m ON t.patient_id = m.patient_id
 SET t.nd_patient_id = m.nd_patient_id;
 
--- 8.3 drop the raw identifier and enforce uniqueness on nd_patient_id
---     (the delta upsert relies on this unique key). NULL nd_patient_id rows are
---     orphan PII with no mapped patient — MySQL permits multiple NULLs here.
+-- 8.3 keep the raw id (rename patient_id → patientid, widen to BIGINT) and enforce
+--     uniqueness on nd_patient_id (the delta upsert relies on this unique key).
+--     NULL nd_patient_id rows are orphan PII with no mapped patient — MySQL permits
+--     multiple NULLs in a UNIQUE key.
 ALTER TABLE master_pg.pii_data_table
-  DROP COLUMN patient_id,
-  ADD UNIQUE KEY uq_nd_patient_id (nd_patient_id);
+  CHANGE COLUMN patient_id patientid BIGINT NOT NULL,
+  ADD UNIQUE KEY uq_nd_patient_id (nd_patient_id),
+  ADD INDEX idx_patientid (patientid);
 
 -- =============================================================================
--- SECTION 9: Migrate master_insurance_table  (master → master_pg, re-keyed)
---   Same pattern. Insurance is one row per patient (the old delta updated by
---   patient_id only), so nd_patient_id is unique here too.
+-- SECTION 9: Migrate master_insurance_table  (master → master_pg)
+--   Same pattern, but insurance is MULTI-ROW per patient (primary + secondary
+--   coverages), so nd_patient_id is a plain index, not a unique key.
 -- =============================================================================
 
+-- Insurance is MULTI-ROW per patient (primary + secondary coverages), so
+-- nd_patient_id is a plain INDEX here, NOT a unique key. The insurance delta
+-- refreshes a patient by DELETE-by-nd_patient_id + INSERT.
 CREATE TABLE IF NOT EXISTS master_pg.master_insurance_table LIKE master.master_insurance_table;
 INSERT INTO master_pg.master_insurance_table SELECT * FROM master.master_insurance_table;
 
@@ -197,8 +204,9 @@ JOIN mapping.patient_mapping_table m ON t.patient_id = m.patient_id
 SET t.nd_patient_id = m.nd_patient_id;
 
 ALTER TABLE master_pg.master_insurance_table
-  DROP COLUMN patient_id,
-  ADD UNIQUE KEY uq_nd_patient_id (nd_patient_id);
+  CHANGE COLUMN patient_id patientid BIGINT NOT NULL,
+  ADD INDEX idx_nd_patient_id (nd_patient_id),
+  ADD INDEX idx_patientid (patientid);
 
 -- =============================================================================
 -- SECTION 10: Master verification queries
