@@ -974,7 +974,7 @@ with DAG(
 
         deid_config_file = os.environ.get(
             "DEID_CONFIG_FILE",
-            os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", "scripts", "configs", "dent_config_incremental.yaml")),
+            os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", "scripts", "ecw", "ecw_config_incremental.yaml")),
         )
         deid_tables_csv = os.environ.get("DEID_TABLES_CSV", "")
 
