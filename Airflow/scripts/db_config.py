@@ -63,9 +63,16 @@ _DB_USER      = os.environ.get("DB_USER", "")
 _DB_PASS      = os.environ.get("DB_PASS", "")
 _DB_HOST      = os.environ.get("DB_HOST", "localhost")
 _SOURCE_HOST  = os.environ.get("SOURCE_DB_HOST") or _DB_HOST
-_PROD_HOST    = os.environ.get("PROD_HOST") or _SOURCE_HOST
 _SOURCE_PORT  = os.environ.get("SOURCE_DB_PORT", "1433")
 _DB_PORT      = os.environ.get("DB_PORT", "3306")
+# PROD_* = the remote upstream prod MSSQL (read by the diff/merge + mapping/master
+# scripts). Each falls back to its SOURCE_DB_* counterpart when unset, so a
+# same-credentials remote needs only PROD_HOST; set PROD_USER/PROD_PASS/PROD_PORT
+# only when the remote prod uses DIFFERENT credentials or port than the source DB.
+_PROD_HOST    = os.environ.get("PROD_HOST") or _SOURCE_HOST
+_PROD_USER    = os.environ.get("PROD_USER") or _SOURCE_USER
+_PROD_PW      = os.environ.get("PROD_PASS") or _SOURCE_PW
+_PROD_PORT    = os.environ.get("PROD_PORT") or _SOURCE_PORT
 
 _BASE_DB_NAME    = os.environ.get("BASE_DB_NAME", "")
 _PROD_DB_NAME    = os.environ.get("PROD_DB_NAME", "")
@@ -93,7 +100,7 @@ HISTORICAL_DATA_DEFAULT_DATE = os.environ.get("HISTORICAL_DATA_DEFAULT_DATE", ""
 
 # ── MSSQL connection strings — built from primitives ───────────────────────────
 BASE_DB         = f"mssql+pyodbc://{_SOURCE_USER}:{_SOURCE_PW}@{_SOURCE_HOST}:{_SOURCE_PORT}/{_BASE_DB_NAME}{_ODBC}"
-PROD_DB         = f"mssql+pyodbc://{_SOURCE_USER}:{_SOURCE_PW}@{_PROD_HOST}:{_SOURCE_PORT}/{_PROD_DB_NAME}{_ODBC}"
+PROD_DB         = f"mssql+pyodbc://{_PROD_USER}:{_PROD_PW}@{_PROD_HOST}:{_PROD_PORT}/{_PROD_DB_NAME}{_ODBC}"
 DIFF_STAGING_DB = f"mssql+pyodbc://{_SOURCE_USER}:{_SOURCE_PW}@{_SOURCE_HOST}:{_SOURCE_PORT}/{_STAGING_DB_NAME}{_ODBC}"
 DIFFMERGED_CONN = f"mssql+pyodbc://{_SOURCE_USER}:{_SOURCE_PW}@{_SOURCE_HOST}:{_SOURCE_PORT}/{_MERGED_DB_NAME}{_ODBC}"
 
@@ -116,10 +123,10 @@ DEID_POST_PROCESS_TABLES_CSV = os.environ.get("DEID_POST_PROCESS_TABLES_CSV", ""
 # ── Mapping dict (mssql_incremental_mapping_update*.py) ─────────────────────────
 MAPPING_MSSQL_CONN = {
     "server":   _PROD_HOST,
-    "port":     int(_SOURCE_PORT),
+    "port":     int(_PROD_PORT),
     "database": _PROD_DB_NAME,
-    "user":     _SOURCE_USER,
-    "password": _SOURCE_PW,
+    "user":     _PROD_USER,
+    "password": _PROD_PW,
 }
 MAPPING_MYSQL_CONN = {
     "host":     _DB_HOST,
@@ -129,7 +136,7 @@ MAPPING_MYSQL_CONN = {
 }
 
 # ── Master recreate connection strings (mssql_incremental_master_recreate.py) ───
-MASTER_MSSQL_CONN_STR = f"mssql+pyodbc://{_SOURCE_USER}:{_SOURCE_PW}@{_PROD_HOST}:{_SOURCE_PORT}/{_PROD_DB_NAME}{_ODBC}"
+MASTER_MSSQL_CONN_STR = f"mssql+pyodbc://{_PROD_USER}:{_PROD_PW}@{_PROD_HOST}:{_PROD_PORT}/{_PROD_DB_NAME}{_ODBC}"
 MASTER_MYSQL_CONN_STR = f"mysql+pymysql://{_DB_USER}:{_DB_PASS}@{_DB_HOST}:{_DB_PORT}/{_MASTER_DB_NAME}"
 
 MAPPING_SQL_FILE=''
