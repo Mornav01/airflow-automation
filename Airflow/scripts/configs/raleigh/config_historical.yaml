@@ -42,7 +42,7 @@ redis_url: redis://localhost:6379/0
 # ── De-Identification Settings ───────────────────────────────────────
 deidentification:
   batch_size: 100000
-  date_offset_days: 34
+  date_offset_days: ${DATE_OFFSET}
   patient_id_prefix: 10000000
   random_seed: 42
 
