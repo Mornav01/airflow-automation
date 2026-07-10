@@ -24,7 +24,7 @@ mappings_db:
   password: ${DB_PASS}
 
 join_db:
-  type: mssql
+  type: ${SOURCE_DB_TYPE}
   host: localhost
   port: 1435
   database: Primerecord_base_03152026

@@ -24,8 +24,8 @@ mappings_db:
   password: ${DB_PASS}
 
 join_db:
-  type: mssql
-  host: ${DB_HOST}
+  type: ${SOURCE_DB_TYPE}
+  host: ${SOURCE_DB_HOST}
   port: ${SOURCE_DB_PORT}
   database: ${PROD_DB_NAME}
   username: ${SOURCE_DB_USER}

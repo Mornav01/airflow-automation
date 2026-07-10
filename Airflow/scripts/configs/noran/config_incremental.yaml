@@ -24,7 +24,7 @@ mappings_db:
   password: ${DB_PASS}
 
 join_db:
-  type: mysql
+  type: ${SOURCE_DB_TYPE}
   host: localhost
   port: 3306
   database: centricityps_original_16oct

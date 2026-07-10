@@ -3,12 +3,13 @@
 # All source connection primitives come from the SOURCE_DB_* family, set per
 # machine in .env. SOURCE_DB_HOST falls back to DB_HOST when the source is local.
 #   mysql → SOURCE_DB_PORT=3306 ; mssql → SOURCE_DB_PORT=1433
-# destination/mappings/join stay MySQL (DB_*) below.
+# destination/mappings stay MySQL (DB_*). join_db mirrors source_db (SOURCE_DB_*)
+# but reads the full prod DB (${PROD_DB_NAME}) for FK/reference-table joins.
 source_db:
   type: ${SOURCE_DB_TYPE}
   host: ${SOURCE_DB_HOST}
   port: ${SOURCE_DB_PORT}
-  database: ${STAGING_SCHEMA}
+  database: ${STAGING_DB_NAME}
   username: ${SOURCE_DB_USER}
   password: ${SOURCE_DB_PASS}
 
@@ -29,12 +30,12 @@ mappings_db:
   password: ${DB_PASS}
 
 join_db:
-  type: mysql
-  host: ${DB_HOST}
-  port: ${DB_PORT}
-  database: ${PROD_SCHEMA}
-  username: ${DB_USER}
-  password: ${DB_PASS}
+  type: ${SOURCE_DB_TYPE}
+  host: ${SOURCE_DB_HOST}
+  port: ${SOURCE_DB_PORT}
+  database: ${PROD_DB_NAME}
+  username: ${SOURCE_DB_USER}
+  password: ${SOURCE_DB_PASS}
 
 # ── Namespace Key ────────────────────────────────────────────────────
 config_key: incremental

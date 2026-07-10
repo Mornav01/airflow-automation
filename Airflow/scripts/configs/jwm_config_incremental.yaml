@@ -24,9 +24,9 @@ mappings_db:
   password: ${DB_PASS}
 
 join_db:
-  type: mssql
-  host: localhost
-  port: 1433
+  type: ${SOURCE_DB_TYPE}
+  host: ${SOURCE_DB_HOST}
+  port: ${SOURCE_DB_PORT}
   database: Primerecord_latest
   username: ${SOURCE_DB_USER}
   password: ${SOURCE_DB_PASS}

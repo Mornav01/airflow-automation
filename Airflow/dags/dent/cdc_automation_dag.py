@@ -62,14 +62,13 @@ PYTHON_EXECUTABLE = os.environ.get("DEID_PYTHON", "python")
 
 # Default configuration (can be overridden via Airflow Variables or DAG params)
 DEFAULT_CONFIG = {
-    "staging_schema":     os.environ.get("STAGING_SCHEMA", ""),
-    "prod_schema":        os.environ.get("PROD_SCHEMA", ""),
+    "staging_schema":     os.environ.get("STAGING_DB_NAME", ""),
+    "prod_schema":        os.environ.get("PROD_DB_NAME", ""),
     "cdc_schema":         os.environ.get("DB_CDC_SCHEMA", "cdc"),
     "mapping_schema":     os.environ.get("MAPPING_DB_NAME", "mapping"),
     "master_schema":      os.environ.get("MASTER_DB_NAME", "master"),
     "deid_staging_schema": os.environ.get("DEID_STAGING_NAME", "deidentified_staging"),
     "deid_prod_schema":   os.environ.get("DEID_BASE_NAME", "deidentified"),
-    "source_schema":      os.environ.get("SOURCE_SCHEMA", ""),
     "mysql_user":         os.environ.get("DB_USER", ""),
     "mysql_pass":         urllib.parse.unquote(os.environ.get("DB_PASS", "")),
     "mysql_host":         os.environ.get("DB_HOST", "localhost"),

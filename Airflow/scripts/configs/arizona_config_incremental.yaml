@@ -24,12 +24,12 @@ mappings_db:
   password: ${DB_PASS}
 
 join_db:
-  type: mssql
+  type: ${SOURCE_DB_TYPE}
   host: 127.0.0.1
   port: 1437
   database: mobiledoc_base_0601
-  username: ${DB_USER}
-  password: ${DB_PASS}
+  username: ${SOURCE_DB_USER}
+  password: ${SOURCE_DB_PASS}
 
 # ── Namespace Key ────────────────────────────────────────────────────
 config_key: incremental
