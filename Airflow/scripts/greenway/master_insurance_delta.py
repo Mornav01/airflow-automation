@@ -77,7 +77,6 @@ def load_patient_map(mapping_schema: str) -> dict:
 # and is kept as `patientid`; everything after is a value column).
 SOURCE_COLUMNS = [
     "patient_id",
-    "encounter_id",
     "InsuranceCoverage_InsID",
     "InsuranceCoverage_PolicyName",
     "InsuranceCoverage_EmployerName",
@@ -129,7 +128,7 @@ def run_master_insurance_delta(master_schema: str, staging_schema: str, mapping_
     with source_engine.connect() as conn:
         query = text(
             """
-        select a.PatientID as patient_id, NULL as encounter_id,
+        select a.PatientID as patient_id,
         b.InsID as InsuranceCoverage_InsID, b.PolicyName as InsuranceCoverage_PolicyName, b.EmployerName as InsuranceCoverage_EmployerName,
         b.PolicyGroupNumber as InsuranceCoverage_PolicyGroupNumber, b.PolicyNumber as InsuranceCoverage_PolicyNumber,
         b.PolicyHolder as InsuranceCoverage_PolicyHolder,
