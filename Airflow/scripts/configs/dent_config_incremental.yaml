@@ -54,8 +54,10 @@ rules_csv: ${RULES_CSV}
 # ── Mapping Tables ───────────────────────────────────────────────────
 mapping_tables:
   patient:
-    source_column: patient_id
+    source_column: patientid
     destination_column: nd_patient_id
+    identifier_columns:
+      - patientid   # update to match actual columns in patient_mapping_table
   encounter:
     source_column: encounter_id
     destination_column: nd_encounter_id
