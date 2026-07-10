@@ -12,7 +12,7 @@ It:
 
 Schema (new mapping_pg structure — see mapping_migration_to_new_structure_greenway.sql):
   patient_mapping_table(nd_patient_id PK, patientid UNIQUE, offset,
-                        registration_date, reference_mapping, created_at, updated_at)
+                        registration_date, created_at, updated_at)
   encounter_mapping_table(id PK AI, nd_patient_id, encounter_id, nd_encounter_id UNIQUE,
                           encounter_date, nd_ActiveFlag, created_at, updated_at, patientid)
 
@@ -21,9 +21,7 @@ Notes vs the old `mapping` structure:
     AUTO_INCREMENT) assigned as MAX(nd_patient_id)+1.
   - encounters link to patients via the nd_patient_id bridge; patientid is kept
     denormalised on the encounter row.
-  - reference_mapping is RETAINED (holds PersonID) — the de-id REFERENCE_PID path
-    reads patient_mapping_table.reference_mapping to resolve reference PIDs.
-  - created_by / updated_by are gone.
+  - reference_mapping / created_by / updated_by are gone.
 
 Usage:
     python mapping_delta.py --mapping_schema "mapping_pg" --staging_schema "Primerecord_diff_staging"
@@ -121,12 +119,10 @@ def run_mapping_delta(mapping_schema: str, staging_schema: str, state_file: str 
         Column("patientid", BigInteger, nullable=False),
         Column("offset", Integer, nullable=False),
         Column("registration_date", DATETIME, nullable=True),
-        Column("reference_mapping", BigInteger, nullable=True),
         Column("created_at", DATETIME, nullable=False),
         Column("updated_at", DATETIME, nullable=False),
         UniqueConstraint("patientid", name="uq_patientid"),
         Index("idx_patientid", "patientid"),
-        Index("idx_reference_mapping", "reference_mapping"),
     )
 
     encounter_mapping_table = Table(
@@ -194,7 +190,7 @@ def run_mapping_delta(mapping_schema: str, staging_schema: str, state_file: str 
 
     # -------------------------------------------------------------------------
     # Load delta data from staging_schema (MSSQL)
-    #   Patient.PatientID   → patientid ; Patient.PersonID → reference_mapping
+    #   Patient.PatientID   → patientid
     #   br_Account.AcctOpenDate → registration_date
     #   Visit.VisitID       → encounter_id
     # -------------------------------------------------------------------------
@@ -203,7 +199,7 @@ def run_mapping_delta(mapping_schema: str, staging_schema: str, state_file: str 
         users_data = conn.execute(
             text(
                 """
-        select p.PatientID, acc.AcctOpenDate, p.PersonID
+        select p.PatientID, acc.AcctOpenDate
         from Patient as p
         left join br_Account as acc
         on p.PatientID = acc.PatientID
@@ -250,7 +246,7 @@ def run_mapping_delta(mapping_schema: str, staging_schema: str, state_file: str 
         patients_to_insert = []
         patients_to_update = []
 
-        for patientid, registration_date, reference_id in users_data:
+        for patientid, registration_date in users_data:
             # New patient: not in history and not yet processed in this run
             if patientid not in old_pat_ids and patientid not in existing_patient_ids:
                 offset = random.choice(possible_offsets)
@@ -263,7 +259,6 @@ def run_mapping_delta(mapping_schema: str, staging_schema: str, state_file: str 
                         "patientid": patientid,
                         "offset": offset,
                         "registration_date": registration_date,
-                        "reference_mapping": reference_id,
                         "created_at": run_ts,
                         "updated_at": run_ts,
                     }
@@ -275,7 +270,6 @@ def run_mapping_delta(mapping_schema: str, staging_schema: str, state_file: str 
                     {
                         "patientid": patientid,
                         "registration_date": registration_date,
-                        "reference_mapping": reference_id,
                         "updated_at": run_ts,
                     }
                 )
@@ -304,7 +298,6 @@ def run_mapping_delta(mapping_schema: str, staging_schema: str, state_file: str 
                             .values(
                                 {
                                     "registration_date": bindparam("b_reg_date"),
-                                    "reference_mapping": bindparam("b_ref"),
                                     "updated_at": bindparam("b_ts"),
                                 }
                             )
@@ -314,7 +307,6 @@ def run_mapping_delta(mapping_schema: str, staging_schema: str, state_file: str 
                             {
                                 "b_pid": d["patientid"],
                                 "b_reg_date": d["registration_date"],
-                                "b_ref": d["reference_mapping"],
                                 "b_ts": d["updated_at"],
                             }
                             for d in patients_to_update
