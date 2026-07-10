@@ -6,7 +6,7 @@ Updates the PII master table (pii_data_table) in the given master schema using
 deltas from the staging schema.
 
 New master_pg structure: pii_data_table is keyed on nd_patient_id (join key) with
-patientid retained (person_id is kept as a normal PII/reference column). This script
+patientid retained (Patient_PersonID is kept as a normal PII/reference column). This script
 resolves each source patient_id → nd_patient_id via patient_mapping_table in
 --mapping_schema, then writes with a single INSERT ... ON DUPLICATE KEY UPDATE keyed
 on uq_nd_patient_id. NULL source values never overwrite an existing value (COALESCE).
@@ -74,9 +74,9 @@ def load_patient_map(mapping_schema: str) -> dict:
 
 
 # Value columns stored in pii_data_table (patient_id resolves nd_patient_id and is
-# kept as `patientid`; everything else — including person_id — is a value column).
+# kept as `patientid`; everything else — including Patient_PersonID — is a value column).
 PII_VALUE_COLUMNS = [
-    "person_id",
+    "Patient_PersonID",
     "Patient_AltPatientID",
     "Patient_OrgPatientID",
     "Person_PersonID",
@@ -161,7 +161,7 @@ def run_master_pii_delta(master_schema: str, staging_schema: str, mapping_schema
             """
         SELECT
             a.PatientID                         AS patient_id,
-            a.PersonID                          AS person_id,
+            a.PersonID                          AS Patient_PersonID,
             a.AltPatientID                      AS Patient_AltPatientID,
             a.OrgPatientID                      AS Patient_OrgPatientID,
             b.PersonID                          AS Person_PersonID,
