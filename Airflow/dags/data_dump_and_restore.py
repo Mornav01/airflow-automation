@@ -15,7 +15,8 @@ from airflow.sensors.external_task import ExternalTaskSensor
 local_tz = pendulum.timezone("Asia/Kolkata")
 AIRFLOW_HOME = os.environ.get("AIRFLOW_HOME", "/Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/Airflow")
 VENV_PYTHON = "/opt/miniconda3/envs/airenv/bin/python"
-SCRIPT_DAILY_DUMP = os.path.join(AIRFLOW_HOME, "scripts", "daily_dump_new.py")
+# Unified, config-driven dump script (behaviour set via DUMP_* in .env).
+SCRIPT_DAILY_DUMP = os.path.join(AIRFLOW_HOME, "scripts", "daily_dump.py")
 SCRIPT_RESTORE = os.path.join(AIRFLOW_HOME, "scripts", "restore_backups.py")
 
 

@@ -14,8 +14,10 @@ from airflow.providers.standard.operators.bash import BashOperator
 local_tz = pendulum.timezone("Asia/Kolkata")
 AIRFLOW_HOME = os.environ.get("AIRFLOW_HOME", "/Users/ndai/Desktop/Air_DEID/airflow-automation/Airflow")
 VENV_PYTHON = "/opt/miniconda3/envs/air_deid/bin/python"
-SCRIPT_DAILY_DUMP = os.path.join(AIRFLOW_HOME, "scripts", "mind", "daily_dump.py")
-SCRIPT_RESTORE = os.path.join(AIRFLOW_HOME, "scripts", "mind", "restore_incremental_logs.py")
+# Unified, config-driven dump script (behaviour set via DUMP_* in .env).
+SCRIPT_DAILY_DUMP = os.path.join(AIRFLOW_HOME, "scripts", "daily_dump.py")
+# Unified, config-driven restore script (DB list via RESTORE_DB_CONFIGS in .env).
+SCRIPT_RESTORE = os.path.join(AIRFLOW_HOME, "scripts", "restore_incremental_logs.py")
 
 # Set GOOGLE_CHAT_WEBHOOK_URL in Airflow/.env or worker environment
 WEBHOOK_URL = os.environ.get("GOOGLE_CHAT_WEBHOOK_URL", "")

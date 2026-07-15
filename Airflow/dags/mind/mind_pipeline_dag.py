@@ -257,7 +257,8 @@ def task_check_db_availability(**context):
         logger.info("skip_restore=True — skipping DB availability check")
         return
 
-    script = os.path.join(_MIND_SCRIPTS_DIR, "check_db_availability.py")
+    # Shared, config-driven guard (DB list from RESTORE_DB_CONFIGS in .env).
+    script = os.path.join(_SCRIPTS_DIR, "check_db_availability.py")
     result = subprocess.run([DEID_PYTHON, script], capture_output=True, text=True, env=_ENV)
     if result.stdout:
         logger.info(result.stdout)
@@ -270,14 +271,15 @@ def task_check_db_availability(**context):
 
 
 # ── Stage 1: Restore incremental logs ─────────────────────────────────────────
-# The daily dump (SMB sync) runs in the separate mind_daily_dump DAG; the pipeline
-# only applies the dumped transaction logs, gated by skip_restore.
+# The daily dump (SMB sync) runs in the separate unified daily_dump DAG; the
+# pipeline only applies the dumped transaction logs, gated by skip_restore.
 def task_restore(**context):
     if context["params"].get("skip_restore", False):
         logger.info("skip_restore=True — skipping restore, proceeding to decrypt")
         return
 
-    script = os.path.join(_MIND_SCRIPTS_DIR, "restore_incremental_logs.py")
+    # Unified, config-driven restore (DB list from RESTORE_DB_CONFIGS in .env).
+    script = os.path.join(_SCRIPTS_DIR, "restore_incremental_logs.py")
     result = subprocess.run([DEID_PYTHON, script], capture_output=True, text=True, env=_ENV)
     if result.stdout:
         logger.info(result.stdout)

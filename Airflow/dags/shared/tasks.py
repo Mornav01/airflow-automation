@@ -288,61 +288,117 @@ def task_delete_diffmerged(**context):
 # in which scripts_dir they execute scripts from.
 # ══════════════════════════════════════════════════════════════════════════════
 
-def make_daily_dump(scripts_dir: str):
-    """Return a task_daily_dump callable that runs daily_dump.py from scripts_dir.
+def task_daily_dump(**context):
+    """Run the unified, config-driven daily dump (scripts/daily_dump.py).
 
-    The dump is just an SMB file sync of the transaction-log backups — it never
-    touches the databases, so it is safe to run on a daily schedule independently
-    of the pipeline (see the *_dump DAGs).
+    A single script now covers every source (shared SMB folder, Azure Blob,
+    local folder check); behaviour is selected entirely by DUMP_* env vars, so
+    the same DAG + script runs on every machine unchanged.  The dump only reads
+    the source and writes backup files — it never touches the databases — so it
+    is safe to run on a daily schedule independently of the pipeline.
     """
-    def task_daily_dump(**context):
-        if context["params"].get("skip_dump", False):
-            logger.info("skip_dump=True — skipping daily dump")
-            return
+    if context["params"].get("skip_dump", False):
+        logger.info("skip_dump=True — skipping daily dump")
+        return
 
-        script = os.path.join(scripts_dir, "daily_dump.py")
-        rc, out = _run_streaming([_deid_python(), script])
-        if rc != 0:
-            raise RuntimeError(f"daily_dump failed (rc={rc}):\n{out[-4000:]}")
+    script = os.path.join(_SCRIPTS_DIR, "daily_dump.py")
+    rc, out = _run_streaming([_deid_python(), script])
+    if rc != 0:
+        raise RuntimeError(f"daily_dump failed (rc={rc}):\n{out[-4000:]}")
 
+
+def make_daily_dump(scripts_dir: str = ""):
+    """Back-compat factory — returns the unified :func:`task_daily_dump`.
+
+    The *scripts_dir* argument is ignored now that a single shared
+    scripts/daily_dump.py serves every EHR (kept only so any lingering caller
+    keeps working).
+    """
     return task_daily_dump
 
 
-def make_check_db_availability(scripts_dir: str):
-    """Return a task_check_db_availability callable bound to the given scripts_dir.
+def task_check_unzip_required(**_) -> bool:
+    """ShortCircuit gate: run the unzip step only when DUMP_UNZIP_ENABLED is set.
 
-    Guards the restore step: fails if any target database is not ONLINE (e.g. a
-    restore is already in progress) or has active user sessions, so the restore
-    never disrupts a deid/diff-merge job already running against the DB.
+    Returns True (continue to the unzip task) when the machine receives zipped
+    dumps, else False (ShortCircuitOperator skips the downstream unzip task).
     """
-    def task_check_db_availability(**context):
-        if context["params"].get("skip_restore", False):
-            logger.info("skip_restore=True — skipping DB availability check")
-            return
+    enabled = os.environ.get("DUMP_UNZIP_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+    if enabled:
+        logger.info("DUMP_UNZIP_ENABLED — running the unzip step")
+    else:
+        logger.info("DUMP_UNZIP_ENABLED not set — skipping the unzip step")
+    return enabled
 
-        script = os.path.join(scripts_dir, "check_db_availability.py")
-        rc, out = _run_streaming([_deid_python(), script])
-        if rc != 0:
-            raise RuntimeError(f"db availability check failed (rc={rc}):\n{out[-4000:]}")
 
+def task_unzip_dump(**context):
+    """Extract archives dumped by the dump step (scripts/daily_dump.py --task unzip).
+
+    Config-driven via DUMP_UNZIP_* env vars.  Gated upstream by
+    :func:`task_check_unzip_required`, and skipped entirely when skip_dump=True.
+    """
+    if context["params"].get("skip_dump", False):
+        logger.info("skip_dump=True — skipping unzip")
+        return
+
+    script = os.path.join(_SCRIPTS_DIR, "daily_dump.py")
+    rc, out = _run_streaming([_deid_python(), script, "--task", "unzip"])
+    if rc != 0:
+        raise RuntimeError(f"unzip failed (rc={rc}):\n{out[-4000:]}")
+
+
+def task_check_db_availability(**context):
+    """Guard the restore step (shared scripts/check_db_availability.py).
+
+    Fails if any target database is not ONLINE (e.g. a restore is already in
+    progress) or has active user sessions, so the restore never disrupts a
+    deid / diff-merge job already running against the DB.  The DB list and
+    connection settings come from the env (RESTORE_DB_CONFIGS), so one shared
+    script serves every MSSQL EHR.
+    """
+    if context["params"].get("skip_restore", False):
+        logger.info("skip_restore=True — skipping DB availability check")
+        return
+
+    script = os.path.join(_SCRIPTS_DIR, "check_db_availability.py")
+    rc, out = _run_streaming([_deid_python(), script])
+    if rc != 0:
+        raise RuntimeError(f"db availability check failed (rc={rc}):\n{out[-4000:]}")
+
+
+def task_restore(**context):
+    """Apply transaction-log backups (shared scripts/restore_incremental_logs.py).
+
+    Applies the .trn logs dumped by the daily-dump DAG to the databases listed in
+    RESTORE_DB_CONFIGS.  Gated by skip_restore so practices that source their data
+    differently can opt out.
+    """
+    if context["params"].get("skip_restore", False):
+        logger.info("skip_restore=True — skipping restore")
+        return
+
+    script = os.path.join(_SCRIPTS_DIR, "restore_incremental_logs.py")
+    rc, out = _run_streaming([_deid_python(), script])
+    if rc != 0:
+        raise RuntimeError(f"restore failed (rc={rc}):\n{out[-4000:]}")
+
+
+def make_check_db_availability(scripts_dir: str = ""):
+    """Back-compat factory — returns the shared :func:`task_check_db_availability`.
+
+    *scripts_dir* is ignored now that a single scripts/check_db_availability.py
+    serves every EHR.
+    """
     return task_check_db_availability
 
 
-def make_restore(scripts_dir: str):
-    """Return a task_restore callable that runs restore_incremental_logs.py from scripts_dir.
+def make_restore(scripts_dir: str = ""):
+    """Back-compat factory — returns the shared :func:`task_restore`.
 
-    Applies the transaction-log backups dumped by the daily-dump DAG. Gated by
-    skip_restore so practices that source their data differently can opt out.
+    *scripts_dir* is ignored now that a single scripts/restore_incremental_logs.py
+    serves every EHR.
     """
-    def task_restore(**context):
-        if context["params"].get("skip_restore", False):
-            logger.info("skip_restore=True — skipping restore")
-            return
-
-        script = os.path.join(scripts_dir, "restore_incremental_logs.py")
-        rc, out = _run_streaming([_deid_python(), script])
-        if rc != 0:
-            raise RuntimeError(f"restore failed (rc={rc}):\n{out[-4000:]}")
+    return task_restore
 
     return task_restore
 
