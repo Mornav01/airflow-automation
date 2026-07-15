@@ -1,0 +1,114 @@
+# ── AthenaOne deid config (incremental) ──────────────────────────────────────
+# Consumed by manual_deidentification_run_v2.py --config <this file>.
+# ${VAR} tokens are resolved from the environment (Airflow/.env) by the deid
+# engine at load time.
+#
+# Source is the MySQL HISTORICAL schema produced by snowflake_ingest.py
+# (ATHENAONE_HISTORICAL_SCHEMA on the ATHENAONE_MYSQL_* server). The mapping and
+# master tables live in mapping_pg / master_pg (written by the v5 mapping/master
+# scripts — same schema names the athena-family clients use). Destination + deid
+# state live on the local MySQL (DB_* family).
+source_db:
+  type: mysql
+  host: ${ATHENAONE_MYSQL_HOST}
+  port: 3306
+  database: ${ATHENAONE_HISTORICAL_SCHEMA}
+  username: ${ATHENAONE_MYSQL_USER}
+  password: ${ATHENAONE_MYSQL_PASSWORD}
+
+destination_db:
+  type: mysql
+  host: ${DB_HOST}
+  port: ${DB_PORT}
+  database: ${DEID_STAGING_NAME}
+  username: ${DB_USER}
+  password: ${DB_PASS}
+
+mappings_db:
+  type: mysql
+  host: ${DB_HOST}
+  port: ${DB_PORT}
+  database: mapping_pg
+  username: ${DB_USER}
+  password: ${DB_PASS}
+
+# AthenaOne's historical schema is the full source DB, so join_db mirrors source_db.
+join_db:
+  type: mysql
+  host: ${ATHENAONE_MYSQL_HOST}
+  port: 3306
+  database: ${ATHENAONE_HISTORICAL_SCHEMA}
+  username: ${ATHENAONE_MYSQL_USER}
+  password: ${ATHENAONE_MYSQL_PASSWORD}
+
+# ── Namespace Key ────────────────────────────────────────────────────
+config_key: incremental
+
+# ── State Storage ────────────────────────────────────────────────────
+state_db_path: ${LOG_DIR}/state.db
+failed_rows_db_path: ${LOG_DIR}/failed_rows.db
+
+# ── Redis ────────────────────────────────────────────────────────────
+redis_url: redis://localhost:6379/0
+
+# ── De-Identification Settings ───────────────────────────────────────
+deidentification:
+  batch_size: 100000
+  date_offset_days: ${DATE_OFFSET}
+  patient_id_prefix: 10000000
+  random_seed: 42
+
+# ── Tables & Rules ───────────────────────────────────────────────────
+rules_csv: ${RULES_CSV}
+
+# ── Mapping Tables ───────────────────────────────────────────────────
+# Aligns with athenaone_mapping_master_config.yaml + mapping_pg structure:
+# patient (patientid/enterpriseid), chart, encounter.
+mapping_tables:
+  patient:
+    source_column: patientid
+    destination_column: nd_patient_id
+    identifier_columns:
+      - patientid
+      - enterpriseid
+  chart:
+    source_column: chart_id
+    destination_column: nd_chart_id
+    reference: patient
+  encounter:
+    source_column: encounter_id
+    destination_column: nd_encounter_id
+    reference: patient
+
+# ── Pipeline Phases ──────────────────────────────────────────────────
+phases:
+  - setup
+  - deidentify
+
+# ── Worker Settings ──────────────────────────────────────────────────
+workers:
+  fetchers: 3
+  processors: 5
+  max_retries: 1
+  task_timeout: 3600
+
+# ── Logging ──────────────────────────────────────────────────────────
+logging:
+  log_dir: ${LOG_DIR}/incremental
+
+# ── Quality Control ──────────────────────────────────────────────────
+qc:
+  sample_size: 100
+  scan_for_residual_pii: true
+
+# ── PII / Notes Config ───────────────────────────────────────────────
+pii_db:
+  master_connection_str: "mysql+pymysql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/master_pg"
+  secondary_pii_connection_str: "mysql+pymysql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/master_pg"
+
+secondary_pii_config_path: ${SECONDARY_PII_YAML}
+
+pii_config_path: ${PII_YAML}
+
+# ── Reference Mapping Joins ───────────────────────────────────────────
+reference_mappings_path: ${REF_MAPPING_YAML}

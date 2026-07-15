@@ -1,0 +1,67 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# AthenaOne — v5 mapping structural config
+# Consumed by:
+#   incremental_mapping_update_v5_athenaone.py --config <this file>
+#
+# Master tables are now built by the TRUE-DELTA scripts (master_pii_delta.py /
+# master_insurance_delta.py), which read the sql/ queries directly — they do NOT
+# read this file. The master_tables block below is retained for reference (and is
+# still validated by the mapping script's load_config).
+#
+# Structure matches mapping_pg as defined in
+#   scripts/sql/mapping_migration_to_new_structure_athenaone.sql:
+#     patient_mapping_table   : patientid + enterpriseid (1:1, both = source patientid)
+#     chart_mapping_table     : child, linked by enterpriseid
+#     encounter_mapping_table : child, linked by patientid
+#     pii_data_table / master_insurance_table : master, joined by patientid
+#
+# NOTE: loaded with plain yaml.safe_load() — NO ${ENV} substitution. Connection
+# details come from scripts/athenaone/config.py (env-driven). sql_file paths are
+# RELATIVE; the DAG runs these scripts with cwd=scripts/athenaone so they resolve.
+# Source = the MySQL historical schema produced by snowflake_ingest.py.
+# ══════════════════════════════════════════════════════════════════════════════
+source_type: mysql
+
+patient:
+  sql_file: sql/patient_mapping.sql
+  # patientid and enterpriseid are 1:1 (the migration sets enterpriseid = patientid).
+  identifier_columns:
+    - patientid
+    - enterpriseid
+  # nd_patient_id seed when the mapping table is empty. MUST be unique across all
+  # projects on this MySQL server. Replace with athenaone's allocated base_nd_id.
+  base_nd_id: 000000000000000   # TODO: set athenaone's allocated 15-digit base_nd_id
+
+child_tables:
+  - name: chart
+    sql_file: sql/chart_mapping.sql
+    patient_ref_cols:
+      - enterpriseid
+    source_id_col: chart_id
+    date_col: chart_date
+    nd_id_suffix_len: 4
+    mapping_table: chart_mapping_table
+    nd_id_col: nd_chart_id
+
+  - name: encounter
+    sql_file: sql/encounter_mapping.sql
+    patient_ref_cols:
+      - patientid
+    source_id_col: encounter_id
+    date_col: encounter_date
+    nd_id_suffix_len: 4
+    mapping_table: encounter_mapping_table
+    nd_id_col: nd_encounter_id
+
+master_tables:
+  - name: pii_data
+    sql_file: sql/master_pii_data.sql
+    join_cols:
+      - patientid
+    target_table: pii_data_table
+
+  - name: master_insurance
+    sql_file: sql/master_insurance_data.sql
+    join_cols:
+      - patientid
+    target_table: master_insurance_table

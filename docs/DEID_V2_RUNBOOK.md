@@ -8,6 +8,7 @@
 5. [Running from Airflow DAG (Incremental)](#5-running-from-airflow-dag-incremental)
 6. [config_key Rules — One Key Per YAML](#6-config_key-rules--one-key-per-yaml)
 7. [join_db for Incremental Runs](#7-join_db-for-incremental-runs)
+8. [AthenaOne pipeline](#8-athenaone-pipeline)
 
 ---
 
@@ -291,3 +292,43 @@ join_db:
 When `join_db` is set, `reference_mappings.yaml` lookups (the indirect joins) use `join_db` instead of `source_db`. The incremental data is still fetched from `source_db` (`mobiledoc_diff_merged`) — only the reference table lookups go to `join_db`.
 
 **Rule:** Always configure `join_db` in the incremental config whenever `reference_mappings.yaml` has entries for any table in your `tables.csv`.
+
+---
+
+## 8. AthenaOne pipeline
+
+AthenaOne uses the consolidated architecture (`dags/athenaone/athenaone_pipeline_dag.py`,
+`dag_id="athenaone_pipeline"`) but ingests from **Snowflake** instead of an on-prem
+restore/diff-merge. All artifacts live under `scripts/athenaone/`.
+
+```
+snowflake_ingest → check_continue → run_mapping → [pii_data, master_insurance]
+    → validate_mapping_master → init_deid_state → run_deid → check_deid_status
+    → [merge_deid_data, s3_transfer]; merge_deid_data → delete_original_diffmerged
+```
+
+### Stages
+
+| Stage | Script | Notes |
+|-------|--------|-------|
+| Ingest | `snowflake_ingest.py` (→ `ingest/*`) | 10-step Snowflake→MySQL pull; recreates `ATHENAONE_INCREMENTAL_SCHEMA`, merges into `ATHENAONE_HISTORICAL_SCHEMA` |
+| Mapping | `incremental_mapping_update_v5_athenaone.py --config athenaone_mapping_master_config.yaml` | writes `mapping_pg` (patient/chart/encounter); runs with cwd=`scripts/athenaone` so the config's relative `sql/*.sql` paths resolve |
+| Master (delta) | `master_pii_delta.py` + `master_insurance_delta.py` (shared `make_pii_data`/`make_master_insurance` factory tasks) | **true delta** — read the incremental pull (`--staging_schema` = incremental schema), resolve nd_patient_id via `mapping_pg`, per-patient DELETE+INSERT into `master_pg`. Same contract as eCW/Greenway. Master tables auto-create on first run. |
+| Deid + post | shared tasks via `manual_deidentification_run_v2.py --config athenaone_config_incremental.yaml` | then merge + S3 |
+
+Deps (`snowflake-*`) are in `deidentification_v2/requirements.txt`.
+
+### Setup
+
+1. Set the `ATHENAONE_*` + `DB_*` + deid `.env` vars (see the ATHENAONE INGESTION block
+   in `.env.example`). Point `PII_YAML`/`SECONDARY_PII_YAML`/`REF_MAPPING_YAML` at
+   `scripts/athenaone/*`, and the v5 `MAPPING_*`/`MASTER_*_CONN` + `MAPPING_CONFIG_FILE`
+   at `mapping_pg`/`master_pg`.
+2. Run `scripts/sql/mapping_migration_to_new_structure_athenaone.sql` once to create
+   `mapping_pg`/`master_pg`.
+3. Set `base_nd_id` in `athenaone_mapping_master_config.yaml` (unique per project).
+4. `RULES_CSV`: point at a path that does not exist yet — the deid engine auto-generates
+   it from the ingested schema on first run, then tune the `rule` column.
+5. Provide `DEID_TABLES_CSV` / `DEID_POST_PROCESS_TABLES_CSV`.
+
+Standalone test order: `snowflake_ingest.py` → mapping/master `--dry-run` → deid.

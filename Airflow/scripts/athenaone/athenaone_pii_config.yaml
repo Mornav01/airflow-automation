@@ -1,0 +1,97 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# AthenaOne — primary PII config (pii_data_table)
+# Referenced by athenaone_config_incremental.yaml via ${PII_YAML}.
+#
+# Columns are the pii_data_table columns = the aliases returned by
+# scripts/athenaone/sql/master_pii_data.sql (FROM PATIENT). Only patient-
+# identifying fields are masked; keys/dates like LASTUPDATED are left intact.
+# Facility-name redactions are injected via the REPLACE_VALUE_JSON env var (see
+# .env), consistent with the other pii_configs — no inline replace_value here.
+# ══════════════════════════════════════════════════════════════════════════════
+combine:
+  patientfullname:
+    combine:
+      - FIRSTNAME
+      - MIDDLEINITIAL
+      - LASTNAME
+    masking_value: "((PATIENTNAME))"
+    processing_func: null
+    regex: null
+  guarantorfullname:
+    combine:
+      - GUARANTORFIRSTNAME
+      - GUARANTORMIDDLEINITIAL
+      - GUARANTORLASTNAME
+    masking_value: "((GUARANTORNAME))"
+    processing_func: null
+    regex: null
+  guardianfullname:
+    combine:
+      - GUARDIANFIRSTNAME
+      - GUARDIANMIDDLEINITIAL
+      - GUARDIANLASTNAME
+    masking_value: "((GUARDIANNAME))"
+    processing_func: null
+    regex: null
+
+dob:
+  DOB:
+    masking_value: "((PatientDOB))"
+  GUARANTORDOB:
+    masking_value: "((GuarantorDOB))"
+
+zipcode:
+  ZIP:
+    masking_value: "((PatientZip))"
+  GUARANTORZIP:
+    masking_value: "((GuarantorZip))"
+
+mask:
+  PATIENTSSN:
+    masking_value: "((PatientSSN))"
+    min_length: 2
+  GUARANTORSSN:
+    masking_value: "((GuarantorSSN))"
+    min_length: 2
+  EMAIL:
+    masking_value: "((PatientEmail))"
+    min_length: 2
+  GUARANTOREMAIL:
+    masking_value: "((GuarantorEmail))"
+    min_length: 2
+  PATIENTHOMEPHONE:
+    masking_value: "((PatientPhone))"
+    min_length: 2
+  WORKPHONE:
+    masking_value: "((PatientPhone))"
+    min_length: 2
+  MOBILEPHONE:
+    masking_value: "((PatientPhone))"
+    min_length: 2
+  GUARANTORPHONE:
+    masking_value: "((GuarantorPhone))"
+    min_length: 2
+  EMERGENCYCONTACTPHONE:
+    masking_value: "((EmergencyPhone))"
+    min_length: 2
+  EMERGENCYCONTACTNAME:
+    masking_value: "((EmergencyContactName))"
+    min_length: 2
+  ADDRESS:
+    masking_value: "((PatientAddress))"
+    min_length: 2
+  ADDRESS2:
+    masking_value: "((PatientAddress))"
+    min_length: 2
+  CITY:
+    masking_value: "((PatientCity))"
+    min_length: 2
+  GUARANTORADDRESS:
+    masking_value: "((GuarantorAddress))"
+    min_length: 2
+  GUARANTORADDRESS2:
+    masking_value: "((GuarantorAddress))"
+    min_length: 2
+  GUARANTORCITY:
+    masking_value: "((GuarantorCity))"
+    min_length: 2

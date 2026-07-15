@@ -42,7 +42,7 @@ def _env() -> dict:
     return {**os.environ, "PYTHONUNBUFFERED": "1"}
 
 
-def _run_streaming(cmd, *, env: dict | None = None) -> tuple[int, str]:
+def _run_streaming(cmd, *, env: dict | None = None, cwd: str | None = None) -> tuple[int, str]:
     """Run *cmd*, streaming its merged stdout+stderr to the Airflow task log
     line by line as the child produces it (realtime), while also collecting the
     full output.  Returns ``(returncode, output_text)``.
@@ -51,6 +51,10 @@ def _run_streaming(cmd, *, env: dict | None = None) -> tuple[int, str]:
     use this for commands whose stdout must be parsed separately from stderr
     (e.g. JSON emitted on stdout) — use ``subprocess.run(capture_output=True)``
     there so the streams stay distinct.
+
+    *cwd* sets the child's working directory (default: inherited) — needed by
+    scripts that read config-relative paths, e.g. the AthenaOne v5 mapping/master
+    scripts whose YAML references sql/ paths relative to scripts/athenaone/.
     """
     proc = subprocess.Popen(
         cmd,
@@ -59,6 +63,7 @@ def _run_streaming(cmd, *, env: dict | None = None) -> tuple[int, str]:
         text=True,
         bufsize=1,                  # line-buffered
         env=env if env is not None else _env(),
+        cwd=cwd,
     )
     lines: list[str] = []
     assert proc.stdout is not None
