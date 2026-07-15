@@ -3,16 +3,16 @@
 # ${VAR} tokens are resolved from the environment (Airflow/.env) by the deid
 # engine at load time.
 #
-# Source is the MySQL HISTORICAL schema produced by snowflake_ingest.py
-# (ATHENAONE_HISTORICAL_SCHEMA on the ATHENAONE_MYSQL_* server). The mapping and
-# master tables live in mapping_pg / master_pg (written by the v5 mapping/master
-# scripts — same schema names the athena-family clients use). Destination + deid
-# state live on the local MySQL (DB_* family).
+# Source is the INCREMENTAL schema (today's Snowflake pull — the delta) so deid
+# processes only changed rows, like eCW/Greenway (source = delta staging).
+# Reference-table lookups (reference_mappings) go to join_db = the full HISTORICAL
+# schema. Both live on the ATHENAONE_MYSQL_* server. The mapping/master tables
+# live in mapping_pg / master_pg; destination + deid state on local MySQL (DB_*).
 source_db:
   type: mysql
   host: ${ATHENAONE_MYSQL_HOST}
   port: 3306
-  database: ${ATHENAONE_HISTORICAL_SCHEMA}
+  database: ${ATHENAONE_INCREMENTAL_SCHEMA}
   username: ${ATHENAONE_MYSQL_USER}
   password: ${ATHENAONE_MYSQL_PASSWORD}
 
@@ -32,7 +32,8 @@ mappings_db:
   username: ${DB_USER}
   password: ${DB_PASS}
 
-# AthenaOne's historical schema is the full source DB, so join_db mirrors source_db.
+# join_db = the full HISTORICAL schema — reference-table lookups (per
+# reference_mappings.yaml) resolve against all rows, not just today's delta.
 join_db:
   type: mysql
   host: ${ATHENAONE_MYSQL_HOST}

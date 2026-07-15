@@ -1,0 +1,17 @@
+# Per-practice pipeline config for the tncpa (AthenaOne) practice.
+# Loaded at DAG parse time via PRACTICE_NAME=tncpa in .env.
+# All values can still be overridden per-run in the Airflow UI.
+
+# Skip the Snowflake ingestion (e.g. when re-running downstream only).
+skip_ingest: false
+# Stop after ingestion, before mapping/master + deid.
+stop_after_ingest: false
+
+# Deid parallelism (shared task defaults).
+deid_init_max_workers: 16
+deid_status_max_workers: 8
+deid_merge_max_workers: 8
+deid_delete_max_workers: 8
+
+# S3 transfer parser workers (null => transfer script default).
+parser_workers: null
