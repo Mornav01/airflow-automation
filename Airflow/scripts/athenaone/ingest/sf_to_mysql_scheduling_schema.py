@@ -119,7 +119,7 @@ data_type_mapping = {
    'NUMBER(2,0)': 'TINYINT',
    'NUMBER(3,0)': 'TINYINT',
    'NUMBER(4,0)': 'SMALLINT',
-   'NUMBER(5,0)': 'SMALLINT',
+   'NUMBER(5,0)': 'INT',
    'NUMBER(6,0)': 'MEDIUMINT',
    'NUMBER(7,0)': 'MEDIUMINT',
    'NUMBER(8,0)': 'INT',
@@ -170,7 +170,9 @@ data_type_mapping = {
 
 
    # TIMESTAMP
-   'TIMESTAMP_NTZ(9)': 'DATETIME',  # or just DATETIME depending on precision need
+   'TIMESTAMP_NTZ(9)': 'DATETIME',
+   'TIMESTAMP_LTZ(9)': 'DATETIME',
+   'TIMESTAMP_TZ(9)':  'DATETIME',  # or just DATETIME depending on precision need
 
 
    # VARCHAR(n)
@@ -187,7 +189,7 @@ data_type_mapping = {
    'VARCHAR(28)': 'VARCHAR(28)',
    'VARCHAR(30)': 'VARCHAR(30)',
    'VARCHAR(50)': 'VARCHAR(50)',
-   'VARCHAR(16777216)': 'TEXT',  # MySQL's VARCHAR max is 65535; TEXT is safer
+   'VARCHAR(16777216)': 'LONGTEXT',  # MySQL's VARCHAR max is 65535; TEXT is safer
 }
 
 # SQL query to get all tables with metadata (defined after database/schema variables)
@@ -219,9 +221,12 @@ def insert_data_in_batches(table_name, column_names, data, batch_size):
            batch_tuples = data[start:start + batch_size]
 
 
-           # Ensure each row is a tuple
-           if not isinstance(batch_tuples[0], tuple):
-               batch_tuples = [tuple(row) for row in batch_tuples]
+           # Ensure each row is a tuple and escape % so PyMySQL executemany
+           # does not treat it as a format placeholder.
+           batch_tuples = [
+               tuple(v.replace('%', '%%') if isinstance(v, str) else v for v in row)
+               for row in batch_tuples
+           ]
 
 
            logger.info(f"Inserting batch {batch_number}/{total_batches} into {table_name}...")

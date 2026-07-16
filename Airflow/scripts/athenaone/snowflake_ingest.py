@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-snowflake_ingest.py — AthenaOne ingestion (Snowflake → MySQL), 10-step runner.
+snowflake_ingest.py — AthenaOne ingestion (Snowflake → MySQL), 11-step runner.
 
 Standalone port of the reference repo's ``manual_pipeline_runner.py``
 (athenaone_airflow_automation), decoupled from Django:
@@ -10,17 +10,22 @@ Standalone port of the reference repo's ``manual_pipeline_runner.py``
     run off the config-driven v5 scripts, not the queue
   * in-script Google-Chat notifications are dropped — alerting is handled by the
     Airflow task callbacks in dags/shared/notifications.py
+  * the reference's separate "fix two tables" + "extract two tables" workaround
+    is dropped: it only existed because CLOB columns were mapped to TEXT (64 KB)
+    and NUMBER(5,0) to SMALLINT. Step 2's extractor now maps VARCHAR(16777216)→
+    LONGTEXT and NUMBER(5,0)→INT (matching the airflow extract_table), so the
+    single extraction pass handles INTERFACEMESSAGEDATACLOB/MEDICATION correctly
+    — no re-extraction, no double-pull.
 
 Steps (abort on the first failure, exit non-zero so the Airflow task fails):
-  1. Recreate incremental schema       8. Add extraction date column
-  2. Extract from Snowflake            9. Update nd_auto_increment_id
-  3. Fix two tables                   10. Ensure merge indexes
-  4. Extract two tables               11. Set historical flags to N
-  5. Appointment table alter          12. Merge to historical
-  6. Extract scheduling schema        13. Finalize active flags
-  7. Extract financials schema
+  1. Recreate incremental schema       7. Update nd_auto_increment_id
+  2. Extract from Snowflake            8. Ensure merge indexes
+  3. Appointment table alter           9. Set historical flags to N
+  4. Extract scheduling schema        10. Merge to historical
+  5. Extract financials schema        11. Finalize active flags
+  6. Add extraction date column
 
-Steps 10–13 maintain AthenaOne's SCD-2 nd_active_flag in the historical schema
+Steps 8–11 maintain AthenaOne's SCD-2 nd_active_flag in the historical schema
 (one active row per PK). This is where AthenaOne's merge differs from the other
 EHRs, which use the shared state_diff_merge_v3 instead. See
 ingest/active_flag_merge.py.
@@ -79,8 +84,6 @@ def main() -> int:
 
     _log("📦 Importing ingestion step modules...")
     from snowflake_to_mysql_extraction import main as extract_main
-    from fixing_two_tables import run_alter_commands
-    from sf_to_mysql_two_tables import main as two_tables_main
     from appointment_alter import main as appointment_alter_main
     from sf_to_mysql_scheduling_schema import main as scheduling_main
     from sf_to_mysql_financials_schema import main as financials_main
@@ -101,8 +104,6 @@ def main() -> int:
     steps = [
         ("Recreate Incremental Schema", step1_recreate_schema),
         ("Extract from Snowflake", extract_main),
-        ("Fix Two Tables", run_alter_commands),
-        ("Extract Two Tables", two_tables_main),
         ("Appointment Table Alter", appointment_alter_main),
         ("Extract Scheduling Schema", scheduling_main),
         ("Extract Financials Schema", financials_main),
