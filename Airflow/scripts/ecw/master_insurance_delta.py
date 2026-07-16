@@ -11,12 +11,19 @@ via patient_mapping_table in --mapping_schema, dedups to one row per patient, an
 writes with a single INSERT ... ON DUPLICATE KEY UPDATE keyed on uq_nd_patient_id.
 NULL source values never overwrite an existing value (COALESCE).
 
+The hcfa table is read from the PROD schema (the full DB, --prod_schema /
+PROD_DB_NAME), not from the delta staging, so insurance detail is always complete;
+edi_invoice (the patient linkage) is still read from --staging_schema. Both are
+read over the one source engine via a cross-schema join, so prod must live on the
+same source server as staging (eCW's default — PROD_HOST falls back to SOURCE_DB_HOST).
+
 The staging source dialect is controlled by SOURCE_DB_TYPE ("mysql" default, or
 "mssql"); master and mapping (dest) schemas are always MySQL.
 
 Usage:
     python master_insurance_delta.py --master_schema "master_pg" \
-        --staging_schema "mobiledoc_staging" --mapping_schema "mapping_pg"
+        --staging_schema "mobiledoc_staging" --mapping_schema "mapping_pg" \
+        --prod_schema "mobiledoc"
 """
 
 import argparse
@@ -81,16 +88,26 @@ def load_patient_map(mapping_schema: str) -> dict:
     return {row[0]: row[1] for row in rows}
 
 
-def run_master_insurance_delta(master_schema: str, staging_schema: str, mapping_schema: str, state_file: str = ""):
+def run_master_insurance_delta(master_schema: str, staging_schema: str, mapping_schema: str,
+                               prod_schema: str = "", state_file: str = ""):
     """
-    Apply delta updates to master_insurance_table in master_schema from staging_schema,
-    keyed on nd_patient_id resolved via mapping_schema.
+    Apply delta updates to master_insurance_table in master_schema, keyed on
+    nd_patient_id resolved via mapping_schema. hcfa is read from prod_schema
+    (full DB); edi_invoice from staging_schema (delta).
     """
+    prod_schema = prod_schema or os.environ.get("PROD_DB_NAME", "")
+    if not prod_schema:
+        raise ValueError(
+            "prod_schema is required (pass --prod_schema or set PROD_DB_NAME): "
+            "hcfa is read from the prod schema."
+        )
+
     logger.info(
-        "Starting master insurance delta: master_schema=%s, staging_schema=%s, mapping_schema=%s",
+        "Starting master insurance delta: master_schema=%s, staging_schema=%s, mapping_schema=%s, prod_schema=%s",
         master_schema,
         staging_schema,
         mapping_schema,
+        prod_schema,
     )
 
     source_engine = build_source_engine(staging_schema)
@@ -105,10 +122,13 @@ def run_master_insurance_delta(master_schema: str, staging_schema: str, mapping_
     # -------------------------------------------------------------------------
     # Load insurance source data from staging (hcfa + edi_invoice)
     # -------------------------------------------------------------------------
-    logger.info("Loading insurance data from %s.hcfa / %s.edi_invoice", staging_schema, staging_schema)
+    logger.info("Loading insurance data from %s.hcfa (prod) / %s.edi_invoice (staging)", prod_schema, staging_schema)
     with source_engine.connect() as conn:
+        # hcfa comes from the full prod DB; edi_invoice from the delta staging DB.
+        # Cross-schema join over the one source engine — both must be on the same
+        # source server (eCW default).
         query = text(
-            """
+            f"""
         SELECT
             b.patientid AS patient_id,
             NULL AS encounter_id,
@@ -141,7 +161,7 @@ def run_master_insurance_delta(master_schema: str, staging_schema: str, mapping_
             a.PayorZip2 AS hcfa_PayorZip2,
             a.PayorCity3 AS hcfa_PayorCity3,
             a.PayorZip3 AS hcfa_PayorZip3
-        FROM hcfa a
+        FROM `{prod_schema}`.hcfa a
         INNER JOIN edi_invoice b ON a.invid = b.id
         """
         )
@@ -280,6 +300,11 @@ def main():
         help="Mapping schema name for nd_patient_id resolution (e.g. 'mapping_pg')",
     )
     parser.add_argument(
+        "--prod_schema",
+        default="",
+        help="Prod (full DB) schema the hcfa table is read from; defaults to PROD_DB_NAME env",
+    )
+    parser.add_argument(
         "--state_file",
         default="",
         help="Optional path to write JSON state file on success",
@@ -291,6 +316,7 @@ def main():
         master_schema=args.master_schema,
         staging_schema=args.staging_schema,
         mapping_schema=args.mapping_schema,
+        prod_schema=args.prod_schema,
         state_file=args.state_file,
     )
 

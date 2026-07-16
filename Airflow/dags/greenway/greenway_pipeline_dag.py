@@ -21,7 +21,7 @@ from shared.tasks import (  # noqa: E402
     _SCRIPTS_DIR,
     _run_streaming,
     make_check_db_availability,
-    make_mapping_update,
+    make_mapping_update_v5,
     make_master_insurance,
     make_pii_data,
     make_restore,
@@ -47,6 +47,7 @@ local_tz = pendulum.timezone("Asia/Kolkata")
 # ──────────────────────────────────────────────────────────────────────────────
 _GREENWAY_SCRIPTS_DIR = os.path.join(_SCRIPTS_DIR, "greenway")
 _DEFAULT_CONFIG       = os.path.join(_GREENWAY_SCRIPTS_DIR, "greenway_config_incremental.yaml")
+_MAPPING_CONFIG       = os.path.join(_GREENWAY_SCRIPTS_DIR, "greenway_mapping_config.yaml")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -117,7 +118,7 @@ def task_clinicalbin_deid(**context):
 # ──────────────────────────────────────────────────────────────────────────────
 task_check_db_availability = make_check_db_availability(_GREENWAY_SCRIPTS_DIR)
 task_restore               = make_restore(_GREENWAY_SCRIPTS_DIR)
-task_mapping_update   = make_mapping_update(_GREENWAY_SCRIPTS_DIR)
+task_mapping_update   = make_mapping_update_v5(_MAPPING_CONFIG)
 task_pii_data         = make_pii_data(_GREENWAY_SCRIPTS_DIR)
 task_master_insurance = make_master_insurance(_GREENWAY_SCRIPTS_DIR)
 

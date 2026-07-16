@@ -421,6 +421,34 @@ def make_mapping_update(scripts_dir: str):
     return task_mapping_update
 
 
+def make_mapping_update_v5(config_file: str):
+    """Return a task_mapping_update callable that runs the v5 mapping script in
+    pipeline mode (config-driven, env connections).
+
+    The v5 script (scripts/incremental_mapping_update_v5.py) replaces the
+    per-EHR mapping_delta.py. It reads its structural config from *config_file*
+    and, given --staging_schema/--mapping_schema, builds the source connection
+    from SOURCE_DB_* (staging/delta) and the dest from DB_* (MySQL mapping),
+    then writes --state_file in the format task_validate_mapping expects.
+    Run with cwd=scripts/ so the config's relative sql/<ehr>/*.sql paths resolve.
+    """
+    def task_mapping_update(**context):
+        params = context["params"]
+        script = os.path.join(_SCRIPTS_DIR, "incremental_mapping_update_v5.py")
+        cmd = [
+            _deid_python(), "-u", script,
+            "--config",         config_file,
+            "--staging_schema", params["staging_schema"],
+            "--mapping_schema", params["mapping_schema"],
+            "--state_file",     _MAPPING_STATE_FILE,
+        ]
+        rc, out = _run_streaming(cmd, cwd=_SCRIPTS_DIR)
+        if rc != 0:
+            raise RuntimeError(f"mapping_update (v5) failed (rc={rc}):\n{out[-4000:]}")
+
+    return task_mapping_update
+
+
 def make_pii_data(scripts_dir: str):
     """Return a task_pii_data callable that runs master_pii_delta.py from scripts_dir."""
     def task_pii_data(**context):
