@@ -86,11 +86,23 @@ def process_table(table_name: str, engine):
                 incr_cols = get_columns(engine, INCR_SCHEMA, table_name)
                 hist_cols = get_columns(engine, HIST_SCHEMA, table_name)
 
+                # AthenaOne SCD-2: historical keeps every version and marks the
+                # current one with nd_active_flag = 'Y'. Ensure the column exists
+                # (the incremental never has it, so CREATE ... LIKE won't add it).
+                # It is DEFAULTed 'Y' and left OUT of the insert below, so every
+                # freshly merged row lands active; set_historical_flags() has
+                # already flipped the superseded rows to 'N', and
+                # finalize_active_flags() elects a single winner per PK afterward.
+                if "nd_active_flag" not in hist_cols:
+                    conn.execute(text(f"ALTER TABLE {dst_fqn} ADD COLUMN `nd_active_flag` VARCHAR(1) DEFAULT 'Y'"))
+                    hist_cols = get_columns(engine, HIST_SCHEMA, table_name)
+
                 # Include nd_auto_increment_id in merge (assigned in step 9)
                 # Don't exclude it - we want to copy the IDs assigned in update_nd_auto_inc_id.py
 
-                # Determine common columns
-                common_cols = sorted(list(set(incr_cols).intersection(hist_cols)))
+                # Determine common columns (never copy nd_active_flag — let the
+                # historical default 'Y' apply to the new rows).
+                common_cols = sorted(set(incr_cols).intersection(hist_cols) - {"nd_active_flag"})
                 if not common_cols:
                     logger.warning("No matching columns for table %s. Skipping.", table_name)
                     return stats

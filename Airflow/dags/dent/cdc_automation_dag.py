@@ -327,6 +327,68 @@ _STAGING_FLOOR_TABLES = frozenset({
 })
 
 
+# Tables whose *encrypted* form must never be de-identified directly — the
+# decrypt_pnotes task first materialises a decrypted copy (progressnotes →
+# progressnotes_decryptfinal), and it is that decrypted copy the deid rules CSV
+# is configured against (NOTES rule on progressnotes_decryptfinal.summary, etc.).
+# If the run list still names the encrypted table, the decrypted copy is never
+# in tables_to_run and progress notes silently go through un-deidentified.
+# Keys/values are compared case-insensitively.
+_DEID_TABLE_SUBSTITUTIONS = {
+    "progressnotes": "progressnotes_decryptfinal",
+}
+
+
+def _build_deid_tables_csv(src_csv: str, out_dir: str) -> str:
+    """Return a tables CSV for the deid run with encrypted tables swapped for their
+    decrypted counterparts (see _DEID_TABLE_SUBSTITUTIONS).
+
+    Reads table names the same way the deid CLI does — first column of each line,
+    skipping blanks and '#' comments — applies the substitutions, de-dupes while
+    preserving order, and writes a fresh one-name-per-line CSV. Returns src_csv
+    unchanged if it is empty/missing (the deid runner reports that itself).
+    """
+    if not src_csv or not os.path.exists(src_csv):
+        return src_csv
+
+    import csv as _csv
+
+    names: list[str] = []
+    with open(src_csv, newline="") as fh:
+        for row in _csv.reader(fh):
+            if not row:
+                continue
+            name = row[0].strip()
+            if not name or name.startswith("#"):
+                continue
+            names.append(name)
+
+    swapped, seen, changed = [], set(), []
+    for name in names:
+        new = _DEID_TABLE_SUBSTITUTIONS.get(name.lower(), name)
+        if new != name:
+            changed.append(f"{name} → {new}")
+        if new.lower() not in seen:
+            seen.add(new.lower())
+            swapped.append(new)
+
+    if changed:
+        logger.info("Deid tables CSV substitutions applied: %s", ", ".join(changed))
+    else:
+        logger.info(
+            "No deid table substitutions needed; %s not present in run list",
+            list(_DEID_TABLE_SUBSTITUTIONS),
+        )
+
+    out_path = os.path.join(out_dir, "deid_tables_effective.csv")
+    with open(out_path, "w", newline="") as fh:
+        writer = _csv.writer(fh)
+        for name in swapped:
+            writer.writerow([name])
+    logger.info("Wrote effective deid tables CSV (%d tables) to %s", len(swapped), out_path)
+    return out_path
+
+
 def _mysql_rows(config: dict, sql: str) -> list[list[str]]:
     """Run a SELECT via the mysql CLI; return rows as tab-split lists of strings."""
     r = subprocess.run(
@@ -396,6 +458,17 @@ def reset_staging_schema_task(**context):
         if row and row[0]
     }
     tables_to_clone = sorted({prod_by_lower[t] for t in wanted if t in prod_by_lower})
+
+    # Tables in the change log that don't exist in prod are NEW tables — there is no
+    # prod structure to clone, so skip them here (cdc_restore skips them as "new tables"
+    # too). Logging them explicitly avoids confusion / spurious missing-table errors.
+    skipped_new = sorted(changed - set(prod_by_lower))
+    if skipped_new:
+        logger.warning(
+            "Skipping %d changed table(s) not present in prod %s (new tables — nothing to clone): %s",
+            len(skipped_new), prod_schema, skipped_new,
+        )
+
     logger.info(
         "Cloning %d/%d changed table(s) + floor to staging %s: %s",
         len(tables_to_clone), len(changed), staging_schema, tables_to_clone,
@@ -509,6 +582,17 @@ with DAG(
         "parser_workers": "8",
         "stop_after_cdc_restore": Param(False, type="boolean", description="If True, short-circuit downstream tasks after cdc_restore"),
         "skip_init_nd_columns": Param(True, type="boolean", description="If True (default), skip the init_all_nd_columns step"),
+        "p0_csv": Param(
+            "", type="string",
+            description="Path to the P0 tables CSV. When set, cdc_parser only writes rows for "
+                        "these tables (or all EXCEPT these when exclude_p0=True); the whole "
+                        "pipeline then scopes itself to those tables. Empty = process ALL tables.",
+        ),
+        "exclude_p0": Param(
+            False, type="boolean",
+            description="Invert p0_csv: process all tables EXCEPT those listed in the CSV, "
+                        "instead of only those listed. No effect when p0_csv is empty.",
+        ),
     },
 ) as dag:
 
@@ -579,6 +663,20 @@ with DAG(
             logger.info("CDC Parser will use %s workers", parser_workers)
         else:
             logger.info("CDC Parser will use default worker count (auto)")
+
+        # P0 table scoping: when a CSV is given, cdc_parser only writes rows for those
+        # tables (or all except them when exclude_p0). Every downstream task reads
+        # DISTINCT table_name from the change log, so this scopes the whole pipeline.
+        p0_csv = (params.get("p0_csv") or "").strip()
+        if p0_csv:
+            cmd.extend(["--p0_csv", p0_csv])
+            if params.get("exclude_p0", False):
+                cmd.append("--exclude_p0")
+                logger.info("CDC Parser will process ALL tables EXCEPT those in P0 CSV: %s", p0_csv)
+            else:
+                logger.info("CDC Parser will process ONLY tables in P0 CSV: %s", p0_csv)
+        else:
+            logger.info("No p0_csv provided — CDC Parser will process ALL tables")
 
         logger.info("Running CDC Parser")
         logger.debug("Command: %s", " ".join(cmd))
@@ -978,19 +1076,33 @@ with DAG(
         )
         deid_tables_csv = os.environ.get("DEID_TABLES_CSV", "")
 
+        # Swap encrypted tables for their decrypted counterparts (progressnotes →
+        # progressnotes_decryptfinal) so the deid run operates on the table
+        # decrypt_pnotes produced, which is what the rules CSV is configured against.
+        tmp_dir = tempfile.mkdtemp(prefix="deid_tables_")
+        effective_tables_csv = _build_deid_tables_csv(deid_tables_csv, tmp_dir)
+
         cmd = [
             PYTHON_EXECUTABLE,
             deid_script,
             "--config", deid_config_file,
-            "--tables", deid_tables_csv,
+            "--tables", effective_tables_csv,
         ]
 
         logger.info("Running Deidentification")
         logger.info("Config : %s", deid_config_file)
-        logger.info("Tables : %s", deid_tables_csv)
+        logger.info("Tables : %s (from %s)", effective_tables_csv, deid_tables_csv)
         logger.debug("Command: %s", " ".join(cmd))
 
-        returncode = _run_streaming(cmd, cwd=os.path.dirname(deid_script))
+        try:
+            returncode = _run_streaming(cmd, cwd=os.path.dirname(deid_script))
+        finally:
+            if effective_tables_csv != deid_tables_csv:
+                try:
+                    os.remove(effective_tables_csv)
+                    os.rmdir(tmp_dir)
+                except OSError:
+                    pass
         if returncode != 0:
             raise RuntimeError(f"Deidentification Run failed with exit code {returncode}")
 

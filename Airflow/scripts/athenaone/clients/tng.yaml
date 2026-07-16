@@ -2,6 +2,9 @@
 # Loaded at DAG parse time via PRACTICE_NAME=tng in .env.
 # All values can still be overridden per-run in the Airflow UI.
 
+# Skip bringing the OpenVPN tunnel up/down around the pull (set true on a
+# machine with no tunnel, or one that stays permanently connected).
+skip_vpn: false
 # Skip the Snowflake ingestion (e.g. when re-running downstream only).
 skip_ingest: false
 # Stop after ingestion, before mapping/master + deid.

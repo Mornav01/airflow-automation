@@ -3,6 +3,7 @@
 # All values can still be overridden per-run in the Airflow UI.
 
 # Skip the Snowflake ingestion (e.g. when re-running downstream only).
+skip_vpn: false
 skip_ingest: false
 # Stop after ingestion, before mapping/master + deid.
 stop_after_ingest: false

@@ -12,11 +12,18 @@ Standalone port of the reference repo's ``manual_pipeline_runner.py``
     Airflow task callbacks in dags/shared/notifications.py
 
 Steps (abort on the first failure, exit non-zero so the Airflow task fails):
-  1. Recreate incremental schema      6. Extract scheduling schema
-  2. Extract from Snowflake           7. Extract financials schema
-  3. Fix two tables                   8. Add extraction date column
-  4. Extract two tables               9. Update nd_auto_increment_id
-  5. Appointment table alter         10. Merge to historical
+  1. Recreate incremental schema       8. Add extraction date column
+  2. Extract from Snowflake            9. Update nd_auto_increment_id
+  3. Fix two tables                   10. Ensure merge indexes
+  4. Extract two tables               11. Set historical flags to N
+  5. Appointment table alter          12. Merge to historical
+  6. Extract scheduling schema        13. Finalize active flags
+  7. Extract financials schema
+
+Steps 10–13 maintain AthenaOne's SCD-2 nd_active_flag in the historical schema
+(one active row per PK). This is where AthenaOne's merge differs from the other
+EHRs, which use the shared state_diff_merge_v3 instead. See
+ingest/active_flag_merge.py.
 
 Usage:  python snowflake_ingest.py
 """
@@ -80,6 +87,7 @@ def main() -> int:
     from nd_extracted_date_column import main as add_date_main
     from update_nd_auto_inc_id import main as update_nd_id_main
     from merging import main as merge_main
+    from active_flag_merge import ensure_indexes, set_historical_flags, finalize_active_flags
 
     def step1_recreate_schema():
         e = _server_engine()
@@ -100,7 +108,11 @@ def main() -> int:
         ("Extract Financials Schema", financials_main),
         ("Add Extraction Date", add_date_main),
         ("Update ND Auto Increment IDs", update_nd_id_main),
+        # AthenaOne SCD-2 (nd_active_flag) — see ingest/active_flag_merge.py.
+        ("Ensure Merge Indexes", ensure_indexes),
+        ("Set Historical Flags to N", set_historical_flags),
         ("Merge to Historical", merge_main),
+        ("Finalize Active Flags", finalize_active_flags),
     ]
 
     total = len(steps)

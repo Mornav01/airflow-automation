@@ -5,6 +5,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from datetime import date, datetime
 
 import yaml
@@ -88,6 +89,72 @@ _ENV        = {**os.environ, "PYTHONUNBUFFERED": "1"}
 
 DEID_TABLES_CSV              = os.environ.get("DEID_TABLES_CSV", "")
 DEID_POST_PROCESS_TABLES_CSV = os.environ.get("DEID_POST_PROCESS_TABLES_CSV", "")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# VPN control — the Snowflake pull runs over the practice OpenVPN tunnel.
+# Ported from the reference repo's services/vpn_service.py, made env-driven so the
+# binary/config/log paths are not hardcoded. Only AthenaOne needs this, so it
+# lives in the AthenaOne DAG rather than shared/tasks.py.
+# ──────────────────────────────────────────────────────────────────────────────
+_OPENVPN_BIN         = os.environ.get("ATHENAONE_OPENVPN_BIN", "/opt/homebrew/sbin/openvpn")
+_OPENVPN_CONFIG      = os.environ.get("ATHENAONE_OPENVPN_CONFIG", "/etc/openvpn/nd-platform.ovpn")
+_OPENVPN_LOG         = os.environ.get("ATHENAONE_OPENVPN_LOG", "/tmp/openvpn_airflow.log")
+_VPN_CONNECT_TIMEOUT = int(os.environ.get("ATHENAONE_VPN_CONNECT_TIMEOUT", "60"))
+
+
+def _vpn_should_skip(params) -> bool:
+    """VPN is skipped when explicitly disabled for the practice, or when the
+    ingest itself is skipped (nothing needs the tunnel)."""
+    if params.get("skip_vpn", False):
+        logger.info("skip_vpn=True — VPN step skipped")
+        return True
+    if params.get("skip_ingest", False):
+        logger.info("skip_ingest=True — no extraction needs the VPN; skipping VPN step")
+        return True
+    return False
+
+
+def task_vpn_connect(**context):
+    """Start OpenVPN as a background daemon and wait until the tunnel is up.
+    Raises if the tunnel is not up within the timeout so the pull never runs
+    off-tunnel."""
+    if _vpn_should_skip(context["params"]):
+        return
+
+    # Clear the previous log so we never match an old run's entries.
+    try:
+        os.remove(_OPENVPN_LOG)
+    except (FileNotFoundError, PermissionError):
+        pass
+
+    subprocess.run(
+        ["sudo", _OPENVPN_BIN, "--config", _OPENVPN_CONFIG, "--daemon", "--log", _OPENVPN_LOG],
+        check=True,
+    )
+
+    deadline = time.time() + _VPN_CONNECT_TIMEOUT
+    while time.time() < deadline:
+        time.sleep(2)
+        if subprocess.run(["pgrep", "-x", "openvpn"], capture_output=True).returncode == 0:
+            time.sleep(5)  # let the tunnel finish establishing before the pull
+            logger.info("VPN connected (config=%s)", _OPENVPN_CONFIG)
+            return
+    raise RuntimeError(f"VPN did not connect within {_VPN_CONNECT_TIMEOUT}s — see {_OPENVPN_LOG}")
+
+
+def task_vpn_disconnect(**context):
+    """Stop all OpenVPN processes. Idempotent — runs with trigger_rule ALL_DONE
+    as a non-gating side branch so the tunnel is always torn down, even if the
+    ingest failed."""
+    if _vpn_should_skip(context["params"]):
+        return
+
+    result = subprocess.run(["sudo", "killall", "openvpn"], capture_output=True, text=True)
+    # killall returns 1 when no process was found — not an error.
+    if result.returncode not in (0, 1):
+        raise RuntimeError(f"vpn_disconnect failed: {result.stderr}")
+    logger.info("VPN disconnected")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -211,6 +278,7 @@ with DAG(
         "s3_deid_schema": os.environ.get("DEID_STAGING_NAME", "deidentified_staging"),
         "parser_workers": _CLIENT_CFG.get("parser_workers", None),
         # Control / parallelism — defaults from clients/<practice>.yaml
+        "skip_vpn":               _CLIENT_CFG.get("skip_vpn", False),
         "skip_ingest":            _CLIENT_CFG.get("skip_ingest", False),
         "stop_after_ingest":      _CLIENT_CFG.get("stop_after_ingest", False),
         "deid_init_max_workers":   _CLIENT_CFG.get("deid_init_max_workers", 16),
@@ -220,10 +288,24 @@ with DAG(
     },
 ) as dag:
 
+    vpn_connect = PythonOperator(
+        task_id="vpn_connect",
+        python_callable=task_vpn_connect,
+    )
+
     snowflake_ingest = PythonOperator(
         task_id="snowflake_ingest",
         python_callable=task_snowflake_ingest,
         execution_timeout=None,
+    )
+
+    # Non-gating side branch: always tear down the tunnel after the pull, even on
+    # failure. Does NOT gate the mapping/deid path (ALL_DONE), so an ingest
+    # failure still propagates through check_continue.
+    vpn_disconnect = PythonOperator(
+        task_id="vpn_disconnect",
+        python_callable=task_vpn_disconnect,
+        trigger_rule=TriggerRule.ALL_DONE,
     )
 
     check_continue = ShortCircuitOperator(
@@ -284,7 +366,10 @@ with DAG(
     )
 
     # ── Pipeline ───────────────────────────────────────────────────────────────
-    # Ingest (Snowflake→MySQL) → checkpoint → mapping → master deltas (parallel) → validate
+    # VPN up → ingest (Snowflake→MySQL) → checkpoint → mapping → master deltas → validate.
+    # vpn_disconnect is a side branch (ALL_DONE) so the tunnel always tears down;
+    # the mapping/deid path continues from snowflake_ingest via check_continue.
+    vpn_connect >> snowflake_ingest >> vpn_disconnect
     snowflake_ingest >> check_continue >> run_mapping
     run_mapping >> [pii_data, master_insurance] >> validate_mapping_master
 
