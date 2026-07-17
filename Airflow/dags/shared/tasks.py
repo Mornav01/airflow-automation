@@ -225,6 +225,48 @@ def task_check_deid_status(**context):
         raise RuntimeError(f"deid status check failed (rc={rc}):\n{out[-4000:]}")
 
 
+def task_auto_qc(**context):
+    """Run the deid Auto-QC framework over a table list and emit two CSVs.
+
+    Shells out to ``python -m deid auto-qc`` (in DEID_PYTHON's env) which runs Part 1 (structured/
+    unstructured scan), Part 2 (mapping/count gate + delta-identity) and Part 3 (master PHI audit)
+    per table, writing ``auto_qc_summary_<ts>.csv`` + ``auto_qc_findings_<ts>.csv`` to ``out_dir``.
+    ``auto_qc_max_workers`` QCs that many tables concurrently. The CLI exits non-zero if any table
+    fails/errors, so this task fails and the failure notification fires.
+
+    Like the deid runner, DEID_REPO_DIR is prepended to PYTHONPATH so ``deid`` resolves to THIS
+    checkout (which has the ``auto-qc`` command) rather than whatever is pip-installed.
+    """
+    params = context["params"]
+    cmd = [
+        _deid_python(), "-m", "deid", "auto-qc",
+        "--config",                params["config_yaml"],
+        "--rules-csv",             params["auto_qc_rules_csv"],
+        "--out-dir",               params["auto_qc_out_dir"],
+        "--max-workers",           str(params.get("auto_qc_max_workers", 4)),
+        "--residual-pii-backend",  params.get("auto_qc_residual_backend", "regex"),
+        "--stamp",
+    ]
+    if params.get("auto_qc_tables_filepath"):
+        cmd += ["--tables-filepath", params["auto_qc_tables_filepath"]]
+    if params.get("auto_qc_pii_master_conn_str"):
+        cmd += ["--pii-master-conn-str", params["auto_qc_pii_master_conn_str"]]
+    if params.get("auto_qc_delta_after"):
+        cmd += ["--delta-after", params["auto_qc_delta_after"]]
+    if params.get("auto_qc_no_gate"):
+        cmd += ["--no-gate"]
+
+    env = _env()
+    repo = os.environ.get("DEID_REPO_DIR")
+    if repo:
+        repo = os.path.abspath(repo)
+        env["PYTHONPATH"] = repo + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+
+    rc, out = _run_streaming(cmd, env=env)
+    if rc != 0:
+        raise RuntimeError(f"auto-qc failed (rc={rc}):\n{out[-4000:]}")
+
+
 def task_merge_deid_data(**context):
     params = context["params"]
     script = os.path.join(_SCRIPTS_DIR, "state_deid_merge.py")
