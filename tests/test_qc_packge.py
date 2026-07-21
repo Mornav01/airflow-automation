@@ -200,10 +200,10 @@ table_name = "users"
 
 from qc_package.scanner import DbScanner
 
-src_connstr = "mysql+pymysql://root:123456789@localhost:3306/nddenttest"
-dest_connstr = "mysql+pymysql://root:123456789@localhost:3306/full_automation"
+src_connstr = f"mysql+pymysql://{os.environ.get('DB_USER','')}:{os.environ.get('DB_PASS','')}@localhost:3306/nddenttest"
+dest_connstr = f"mysql+pymysql://{os.environ.get('DB_USER','')}:{os.environ.get('DB_PASS','')}@localhost:3306/full_automation"
 mapping_config = {
-    "connection_str": "mysql+pymysql://root:123456789@localhost:3306/nddenttest_mapping",
+    "connection_str": f"mysql+pymysql://{os.environ.get('DB_USER','')}:{os.environ.get('DB_PASS','')}@localhost:3306/nddenttest_mapping",
     "inhouse_mapping_table": False,
 }
 

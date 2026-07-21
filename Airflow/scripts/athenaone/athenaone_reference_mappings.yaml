@@ -1,0 +1,21 @@
+# AthenaOne — reference mapping join conditions.
+# Referenced by athenaone_config_incremental.yaml via ${REF_MAPPING_YAML}.
+#
+# Each entry resolves an INDIRECT patient/encounter id (a table that does not
+# carry patientid directly) by walking reference tables in the source DB. See
+# configs/athenapractice_reference_mappings.yaml for the DOCDATA→DOCUMENT shape.
+#
+# AthenaOne rows generally carry PATIENTID directly (data arrives flat from
+# Snowflake — no encrypted/indirect note tables), so no entries are needed yet.
+# Add a block here only if a table to be de-identified lacks a direct patient
+# link, e.g.:
+#
+# SOMECHILDTABLE:
+#   source_table: SOMECHILDTABLE
+#   destination_column: PATIENTID
+#   destination_column_type: patient_id
+#   conditions:
+#     - source_column: PARENTID
+#       reference_table: SOMEPARENTTABLE
+#       column_name: PARENTID
+{}

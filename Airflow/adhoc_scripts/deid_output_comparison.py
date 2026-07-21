@@ -278,9 +278,9 @@ def compare_table(
 
 def main():
     parser = argparse.ArgumentParser(description="Compare old vs new deid output")
-    parser.add_argument("--old-conn",   default="mysql+pymysql://ndadmin:ndADMIN%402025@localhost:3306/testing_deid", help="SQLAlchemy URL for old code output DB")
-    parser.add_argument("--new-conn",   default="mysql+pymysql://ndadmin:ndADMIN%402025@localhost:3306/test_deid",                    help="SQLAlchemy URL for new code output DB")
-    parser.add_argument("--diff-conn",  default="mysql+pymysql://ndadmin:ndADMIN%402025@localhost:3306/test_diff",                    help="SQLAlchemy URL for MySQL DB to store diff results")
+    parser.add_argument("--old-conn",   default=os.environ.get("MYSQL_OLD_CONN", ""),  help="SQLAlchemy URL for old code output DB")
+    parser.add_argument("--new-conn",   default=os.environ.get("MYSQL_NEW_CONN", ""),  help="SQLAlchemy URL for new code output DB")
+    parser.add_argument("--diff-conn",  default=os.environ.get("MYSQL_DIFF_CONN", ""), help="SQLAlchemy URL for MySQL DB to store diff results")
     parser.add_argument("--tables",     default=DEFAULT_TABLES,    help="Path to tables CSV (one table per line)")
     parser.add_argument("--rules-csv",  default=DEFAULT_RULES_CSV, help="Path to config_rules.csv")
     parser.add_argument(

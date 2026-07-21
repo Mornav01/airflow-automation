@@ -115,10 +115,10 @@ join_config: JoinCondition = {
         },
     ],
 }
-source_conn_str = "mysql+pymysql://root:123456789@localhost:3306/nddenttest"
+source_conn_str = f"mysql+pymysql://{os.environ.get('DB_USER','')}:{os.environ.get('DB_PASS','')}@localhost:3306/nddenttest"
 source_db = NDDBHandler(source_conn_str)
 
-dest_conn_str = 'mysql+pymysql://root:123456789@localhost:3306/full_automation'
+dest_conn_str = f'mysql+pymysql://{os.environ.get("DB_USER","")}:{os.environ.get("DB_PASS","")}@localhost:3306/full_automation'
 dest_db = NDDBHandler(dest_conn_str)
 
 create_temporary_table_after_join2(source_db, join_config)

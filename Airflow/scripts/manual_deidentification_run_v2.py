@@ -21,15 +21,21 @@ from dotenv import load_dotenv
 
 # ── Load manual.env ───────────────────────────────────────────────────────────
 
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-load_dotenv(dotenv_path=os.path.join(_SCRIPT_DIR, "..", "manual.env"))
+_SCRIPT_DIR   = os.path.dirname(os.path.abspath(__file__))
+_ENV_FILE     = os.path.join(_SCRIPT_DIR, "..", ".env")
+load_dotenv(dotenv_path=os.path.abspath(_ENV_FILE), override=True)
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
-DEFAULT_CONFIG = os.environ["DEID_V2_CONFIG"]
-DEFAULT_TABLES = os.environ["DEID_V2_TABLES"]
+# DEFAULT_CONFIG = os.environ["DEID_V2_CONFIG"]
+# DEFAULT_TABLES = os.environ["DEID_V2_TABLES"]
 
 # Uses new_deid conda env if set, falls back to current Python
 DEID_PYTHON = os.environ["DEID_PYTHON"]
+
+# Which checkout's `deid` code to run. Prepended to PYTHONPATH below so
+# `python -m deid` imports from THIS repo, not whatever is pip-installed in the
+# conda env — the fix for multiple checkouts (V2/V3/...) sharing one interpreter.
+DEID_REPO_DIR = os.environ.get("DEID_REPO_DIR")
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -54,8 +60,8 @@ def setup_logging():
 
 def main():
     parser = argparse.ArgumentParser(description="Manual deid v2 runner")
-    parser.add_argument("--config",  default=DEFAULT_CONFIG, help="Path to config YAML")
-    parser.add_argument("--tables",  default=DEFAULT_TABLES, help="Path to tables CSV")
+    parser.add_argument("--config",  help="Path to config YAML")
+    parser.add_argument("--tables",  help="Path to tables CSV")
     parser.add_argument("--no-rerun", action="store_true",   help="Omit --rerun flag (resume from last state)")
     args = parser.parse_args()
 
@@ -80,9 +86,34 @@ def main():
     if not args.no_rerun:
         cmd.append("--rerun")
 
+    # ── Pin the `deid` import to DEID_REPO_DIR so the right checkout runs ──────
+    env = os.environ.copy()
+    if DEID_REPO_DIR:
+        repo = os.path.abspath(DEID_REPO_DIR)
+        if not os.path.isdir(os.path.join(repo, "deid")):
+            logging.error("DEID_REPO_DIR (%s) has no 'deid/' package — check the path "
+                          "(it must point at the deidentification_v2 dir).", repo)
+            sys.exit(1)
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = repo + (os.pathsep + existing if existing else "")
+        logging.info("Pinning deid import path (DEID_REPO_DIR): %s", repo)
+        # Log which deid module actually resolves, so a wrong checkout is obvious.
+        probe = subprocess.run(
+            [DEID_PYTHON, "-c", "import deid, sys; sys.stdout.write(deid.__file__)"],
+            env=env, capture_output=True, text=True,
+        )
+        loaded = probe.stdout.strip()
+        logging.info("deid resolved to: %s", loaded or probe.stderr.strip())
+        if loaded and repo not in loaded:
+            logging.warning("deid did NOT load from DEID_REPO_DIR — got %s. "
+                            "A conflicting install is shadowing it.", loaded)
+    else:
+        logging.warning("DEID_REPO_DIR not set — 'deid' resolves to the installed package, "
+                        "which may be a different checkout.")
+
     logging.info("Running: %s", " ".join(cmd))
 
-    result = subprocess.run(cmd)
+    result = subprocess.run(cmd, env=env)
 
     if result.returncode != 0:
         logging.error("deid run failed with exit code %d", result.returncode)

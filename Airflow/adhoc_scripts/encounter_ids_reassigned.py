@@ -1,11 +1,12 @@
+import os
 import mysql.connector
 from itertools import islice
 
 MYSQL_CONN = {
     "host": "localhost",
     "database": "mapping_test",
-    "user": "ndadmin",
-    "password": "ndADMIN@2025"
+    "user": os.environ.get("DB_USER", ""),
+    "password": os.environ.get("DB_PASS", "")
 }
 
 BATCH_SIZE = 100

@@ -1,0 +1,14 @@
+# Pipeline behaviour config for the Arizona (Greenway) practice.
+# Loaded at DAG parse time via PRACTICE_NAME=arizona in .env.
+# All values can still be overridden per-run in the Airflow UI.
+
+skip_dump: true
+skip_restore: true
+stop_after_diff_merge: false
+
+diff_merge_max_workers: 16
+deid_init_max_workers: 16
+deid_status_max_workers: 8
+deid_merge_max_workers: 8
+deid_delete_max_workers: 8
+parser_workers: null

@@ -17,7 +17,7 @@
 edi_inv_cpt:
   source_table: edi_inv_cpt
   destination_column: PatientId
-  destination_column_type: PATIENT_PATIENTID
+  destination_column_type: patient_id
   conditions:
     - source_column: InvoiceId
       reference_table: edi_invoice
@@ -26,7 +26,7 @@ edi_inv_cpt:
 edi_inv_diagnosis:
   source_table: edi_inv_diagnosis
   destination_column: PatientId
-  destination_column_type: PATIENT_PATIENTID
+  destination_column_type: patient_id
   conditions:
     - source_column: InvoiceId
       reference_table: edi_invoice
@@ -35,7 +35,7 @@ edi_inv_diagnosis:
 hcfa:
   source_table: hcfa
   destination_column: PatientId
-  destination_column_type: PATIENT_PATIENTID
+  destination_column_type: patient_id
   conditions:
     - source_column: InvId
       reference_table: edi_invoice
@@ -62,8 +62,17 @@ hl7labnotes:
 edi_inv_insurance:
   source_table: edi_inv_insurance
   destination_column: PatientId
-  destination_column_type: PATIENT_PATIENTID
+  destination_column_type: patient_id
   conditions:
     - source_column: InvoiceId
       reference_table: edi_invoice
       column_name: Id
+
+labdataex:
+  source_table: labdataex
+  destination_column: EncounterId
+  destination_column_type: encounter_id
+  conditions:
+    - source_column: reportId
+      reference_table: labdata
+      column_name: ReportId

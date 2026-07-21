@@ -1,27 +1,27 @@
 # ── Source & Destination Databases ──────────────────────────────────
 source_db:
-  type: mysql
+  type: ${SOURCE_DB_TYPE}
   host: localhost
   port: 3306
   database: athenaone
-  username: ndadmin
-  password: ndADMIN%402025
+  username: ${SOURCE_DB_USER}
+  password: ${SOURCE_DB_PASS}
 
 destination_db:
   type: mysql
   host: localhost
   port: 3306
   database: deidentified_pg_test
-  username: ndadmin
-  password: ndADMIN%402025
+  username: ${DB_USER}
+  password: ${DB_PASS}
 
 mappings_db:
   type: mysql
   host: localhost
   port: 3306
   database: mapping_pg
-  username: ndadmin
-  password: ndADMIN%402025
+  username: ${DB_USER}
+  password: ${DB_PASS}
 
 # ── Namespace Key ────────────────────────────────────────────────────
 config_key: historical
@@ -32,8 +32,8 @@ config_key: historical
 # .deid_staging/ is auto-placed next to state.db (same folder)
 
 
-state_db_url: "mysql+pymysql://ndadmin:ndADMIN%402025@localhost:3306/deid_state"
-failed_rows_db_url: "mysql+pymysql://ndadmin:ndADMIN%402025@localhost:3306/deid_failed"
+state_db_url: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/deid_state"
+failed_rows_db_url: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/deid_failed"
 
 
 # ── Redis ────────────────────────────────────────────────────────────
@@ -42,7 +42,7 @@ redis_url: redis://localhost:6379/0
 # ── De-Identification Settings ───────────────────────────────────────
 deidentification:
   batch_size: 100000
-  date_offset_days: 34
+  date_offset_days: ${DATE_OFFSET}
   patient_id_prefix: 10000000
   random_seed: 42
 
@@ -88,8 +88,8 @@ qc:
 
 # ── PII / Notes Config ───────────────────────────────────────────────
 pii_db:
-  master_connection_str: "mysql+pymysql://ndadmin:ndADMIN%402025@localhost:3306/master_pg"
-  secondary_pii_connection_str: "mysql+pymysql://ndadmin:ndADMIN%402025@localhost:3306/master_pg"
+  master_connection_str: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/master_pg"
+  secondary_pii_connection_str: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/master_pg"
 
 secondary_pii_config_path: /Users/neurodiscoveryai/Desktop/athenaone_airflow_automation/services/configs/raleigh/raleigh_secondary_pii_config.yaml
 

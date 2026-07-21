@@ -1,0 +1,65 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# AthenaOne — secondary PII config (master_insurance_table)
+# Referenced by athenaone_config_incremental.yaml via ${SECONDARY_PII_YAML}.
+#
+# Columns are the master_insurance_table columns = the aliases returned by
+# scripts/athenaone/sql/master_insurance_data.sql (FROM PATIENTINSURANCE).
+# Masks patient-/insured-identifying fields; payer identifiers (INSURANCENAME,
+# POLICYGROUPNUMBER, …) are left intact.
+# ══════════════════════════════════════════════════════════════════════════════
+- table_name: master_insurance_table
+  config:
+    FIRSTNAME:
+      masking_value: ((InsuredFirstName))
+      min_length: 2
+    LASTNAME:
+      masking_value: ((InsuredLastName))
+      min_length: 2
+    MIDDLENAME:
+      masking_value: ((InsuredMiddleName))
+      min_length: 2
+    DOB:
+      masking_value: ((InsuredDOB))
+      min_length: 2
+    SSN:
+      masking_value: ((InsuredSSN))
+      min_length: 2
+    ADDRESS:
+      masking_value: ((InsuredAddress))
+      min_length: 2
+    ADDRESS2:
+      masking_value: ((InsuredAddress))
+      min_length: 2
+    CITY:
+      masking_value: ((InsuredCity))
+      min_length: 2
+    ZIP:
+      masking_value: ((InsuredZip))
+      min_length: 2
+    HOMEPHONE:
+      masking_value: ((InsuredPhone))
+      min_length: 2
+    POLICYIDNUMBER:
+      masking_value: ((PolicyId))
+      min_length: 2
+    POLICYHOLDERIDNUMBER:
+      masking_value: ((PolicyHolderId))
+      min_length: 2
+    PLCINSUREDFIRSTNAME:
+      masking_value: ((InsuredFirstName))
+      min_length: 2
+    PLCINSUREDLASTNAME:
+      masking_value: ((InsuredLastName))
+      min_length: 2
+    PLCINSUREDMIDDLEINITIAL:
+      masking_value: ((InsuredMiddleName))
+      min_length: 2
+    PLCINSUREDADDRESS:
+      masking_value: ((InsuredAddress))
+      min_length: 2
+    PLCINSUREDADDRESS2:
+      masking_value: ((InsuredAddress))
+      min_length: 2
+    PLCINSUREDCITY:
+      masking_value: ((InsuredCity))
+      min_length: 2

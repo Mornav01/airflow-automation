@@ -1,8 +1,10 @@
 import os
+import sys
 import json
 import csv
 import argparse
 import logging
+import concurrent.futures
 from datetime import date
 import traceback
 
@@ -56,15 +58,12 @@ class StateManager:
     def load(self, table):
         path = self._file_path(table)
         if not os.path.exists(path):
-            return {
-                "diff": {},
-                "merge": {}
-            }
+            return {"diff": {}, "merge": {}}
         with open(path, "r") as f:
-            return json.load(f)
-
+            state = json.load(f)
         state.setdefault("diff", {})
         state.setdefault("merge", {})
+        return state
 
     def save(self, table, state):
         path = self._file_path(table)
@@ -142,9 +141,6 @@ def run_diff_step(table):
     instead of the stored procedure.
     Schema is hardcoded as 'dbo'.
     """
-    import sys
-    import os
-
     scripts_dir = os.path.dirname(os.path.abspath(__file__))
     if scripts_dir not in sys.path:
         sys.path.insert(0, scripts_dir)
@@ -175,18 +171,9 @@ def run_diff_step(table):
         }
 
 
-def run_merge_step(table, pk_cols):
-    from merge_engine import MergeEngine
-
-    engine = MergeEngine(
-        db_type=DB_TYPE,
-        main_conn=BASE_DB,
-        diff_conn=DIFF_STAGING_DB,
-        diffmerged_conn=DIFFMERGED_CONN
-    )
-
+def run_merge_step(table, pk_cols, merge_engine):
     try:
-        result = engine.run_table(
+        result = merge_engine.run_table(
             table=table,
             pk_cols=pk_cols,
             default_date=HISTORICAL_DATA_DEFAULT_DATE
@@ -206,7 +193,7 @@ def run_merge_step(table, pk_cols):
 # ========== SINGLE TABLE PIPELINE (DIFF + MERGE) ===========
 # ============================================================
 
-def run_table_pipeline(table, pk_cols, state_manager, skip_logic):
+def run_table_pipeline(table, pk_cols, state_manager, skip_logic, merge_engine):
 
     logging.info(f"Processing table: {table}")
 
@@ -235,7 +222,7 @@ def run_table_pipeline(table, pk_cols, state_manager, skip_logic):
     logging.info(f"Merge Decision: {reason}")
 
     if run_merge:
-        merge_result = run_merge_step(table, pk_cols)
+        merge_result = run_merge_step(table, pk_cols, merge_engine)
         state["merge"] = {
             "last_processed_date": today,
             **merge_result
@@ -248,7 +235,7 @@ def run_table_pipeline(table, pk_cols, state_manager, skip_logic):
 # ===================== LOOP ALL TABLES ======================
 # ============================================================
 
-def run_all_tables(table_csv, pk_csv):
+def run_all_tables(table_csv, pk_csv, max_workers=8):
 
     # Load table list
     with open(table_csv, newline="") as f:
@@ -268,15 +255,36 @@ def run_all_tables(table_csv, pk_csv):
             )
 
     state_manager = StateManager(STATE_DIRECTORY)
-    skip_logic = SkipLogic(date.today().isoformat())
+    skip_logic    = SkipLogic(date.today().isoformat())
 
-    for table in tables:
-        pk_cols = pk_map.get(table)
+    from merge_engine import MergeEngine
+    merge_engine = MergeEngine(
+        db_type=DB_TYPE,
+        main_conn=BASE_DB,
+        diff_conn=DIFF_STAGING_DB,
+        diffmerged_conn=DIFFMERGED_CONN,
+        pool_size=max_workers,
+    )
+
+    def process_table(table):
         if table not in pk_map:
             logging.warning(f"No PK found for {table}. Skipping.")
-            continue
+            return
+        run_table_pipeline(table, pk_map[table], state_manager, skip_logic, merge_engine)
 
-        run_table_pipeline(table, pk_cols, state_manager, skip_logic)
+    logging.info(f"Processing {len(tables)} tables with max_workers={max_workers}")
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(process_table, table): table for table in tables}
+            for future in concurrent.futures.as_completed(futures):
+                table = futures[future]
+                try:
+                    future.result()
+                except Exception as e:
+                    logging.error(f"Unhandled exception for table {table}: {e}")
+    finally:
+        merge_engine.dispose()
 
 
 def generate_summary(table_csv, state_dir):
@@ -357,6 +365,8 @@ def main():
     parser.add_argument("--tables_csv", required=True)
     parser.add_argument("--pk_csv", required=False)
     parser.add_argument("--state_dir", required=True)
+    parser.add_argument("--max_workers", type=int, default=8,
+                        help="Parallel threads for table processing (default: 8)")
 
     args = parser.parse_args()
 
@@ -368,7 +378,7 @@ def main():
         if not args.pk_csv:
             raise ValueError("--pk_csv is required in run mode")
 
-        run_all_tables(args.tables_csv, args.pk_csv)
+        run_all_tables(args.tables_csv, args.pk_csv, max_workers=args.max_workers)
 
         logging.info("Completed")
 

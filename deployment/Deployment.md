@@ -94,7 +94,7 @@ db_model = DbDetailsModel.objects.get(
     db_name="<<your-database-name>>",
 )
 db_model.run_config["mapping_db_config"] = {
-    "connection_str": "mysql+pymysql://root:123456789@localhost:3306/nddenttest_mapping",
+    "connection_str": "mysql+pymysql://<DB_USER>:<DB_PASS>@localhost:3306/nddenttest_mapping",
     "inhouse_mapping_table": False,
 }
 db_model.save()
@@ -102,5 +102,5 @@ db_model.save()
 
 ---
 
-'mysql+pymysql://root:123456789@host.docker.internal:3306/full_automation'
+'mysql+pymysql://<DB_USER>:<DB_PASS>@host.docker.internal:3306/full_automation'
 

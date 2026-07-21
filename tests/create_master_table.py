@@ -30,14 +30,13 @@ pii_tables_config = {
 
 import urllib.parse
 
-encoded_password = urllib.parse.quote_plus("ndADMIN@2025")
 # Connection String with Encoded Password
-src_db_url = "mysql+pymysql://ndadmin:ndADMIN%402025@localhost:3306/athenaone"
-dest_db_url = "mysql+pymysql://ndadmin:ndADMIN%402025@localhost:3306/master"
+src_db_url = f"mysql+pymysql://{os.environ.get('DB_USER','')}:{os.environ.get('DB_PASS','')}@localhost:3306/athenaone"
+dest_db_url = f"mysql+pymysql://{os.environ.get('DB_USER','')}:{os.environ.get('DB_PASS','')}@localhost:3306/master"
 
 
 
-# src_db_url = "mysql+pymysql://root:Texas%402025@localhost/mobiledoc"
-# dest_db_url = "mysql+pymysql://root:Texas%402025@localhost/master"
+# src_db_url = f"mysql+pymysql://{os.environ.get('DB_USER','')}:{os.environ.get('DB_PASS','')}@localhost/mobiledoc"
+# dest_db_url = f"mysql+pymysql://{os.environ.get('DB_USER','')}:{os.environ.get('DB_PASS','')}@localhost/master"
 pii = PIITable(src_db_url, dest_db_url, pii_tables_config)
 pii.generate_pii_tables()

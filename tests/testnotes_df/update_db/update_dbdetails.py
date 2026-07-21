@@ -20,8 +20,8 @@ def update_model():
     #obj.pii_config = {...}  # Update this config
     print(obj.run_config.keys())
     print(obj.run_config['pii_db_config'].keys())
-    obj.source_db_config['connection_str'] = 'mysql+pymysql://root:Neuro%40123@localhost:3306/ndsource'
-    obj.destination_db_config['connection_str'] = 'mysql+pymysql://root:Neuro%40123@localhost:3306/nddestination'
+    obj.source_db_config['connection_str'] = f"mysql+pymysql://{os.environ.get('DB_USER','')}:{os.environ.get('DB_PASS','')}@localhost:3306/ndsource"
+    obj.destination_db_config['connection_str'] = f"mysql+pymysql://{os.environ.get('DB_USER','')}:{os.environ.get('DB_PASS','')}@localhost:3306/nddestination"
     obj.save()
     '''  
     obj.run_config['pii_config'] = {}
@@ -30,9 +30,9 @@ def update_model():
     #print(obj.run_config['mapping_db_config'])
     obj.run_config['mapping_db_config'] = {}
     
-    obj.run_config['mapping_db_config']['connection_str'] = 'mysql+pymysql://root:Neuro%40123@localhost:3306/masterdb'
-    obj.run_config['pii_db_config']['master_connection_str'] = 'mysql+pymysql://root:Neuro%40123@localhost:3306/masterdb'
-    obj.run_config['pii_db_config']['secondary_pii_connection_str'] = 'mysql+pymysql://root:Neuro%40123@localhost:3306/masterdb'
+    obj.run_config['mapping_db_config']['connection_str'] = 'mysql+pymysql://<DB_USER>:<DB_PASS>@localhost:3306/masterdb'
+    obj.run_config['pii_db_config']['master_connection_str'] = 'mysql+pymysql://<DB_USER>:<DB_PASS>@localhost:3306/masterdb'
+    obj.run_config['pii_db_config']['secondary_pii_connection_str'] = 'mysql+pymysql://<DB_USER>:<DB_PASS>@localhost:3306/masterdb'
     #obj.run_config['pii_db_config'] = {}
     obj.run_config['secondary_pii_config'] = []
     obj.save()

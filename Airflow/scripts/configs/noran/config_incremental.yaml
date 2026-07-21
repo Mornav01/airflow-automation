@@ -1,35 +1,35 @@
 # ── Source & Destination Databases ──────────────────────────────────
 source_db:
-  type: mysql
+  type: ${SOURCE_DB_TYPE}
   host: localhost
   port: 3306
   database: centricityps_diff_merged
-  username: ${SOURCE_USER}
-  password: ${SOURCE_PW}
+  username: ${SOURCE_DB_USER}
+  password: ${SOURCE_DB_PASS}
 
 destination_db:
   type: mysql
   host: localhost
   port: 3306
   database: deidentified_diff_staging
-  username: ${DEST_USER}
-  password: ${DEST_PW}
+  username: ${DB_USER}
+  password: ${DB_PASS}
 
 mappings_db:
   type: mysql
   host: localhost
   port: 3306
   database: mapping_pg
-  username: ${DEST_USER}
-  password: ${DEST_PW}
+  username: ${DB_USER}
+  password: ${DB_PASS}
 
 join_db:
-  type: mysql
+  type: ${SOURCE_DB_TYPE}
   host: localhost
   port: 3306
   database: centricityps_original_16oct
-  username: ${SOURCE_USER}
-  password: ${SOURCE_PW}
+  username: ${SOURCE_DB_USER}
+  password: ${SOURCE_DB_PASS}
 
 # ── Namespace Key ────────────────────────────────────────────────────
 config_key: incremental
@@ -39,8 +39,8 @@ config_key: incremental
 #failed_rows_db_path: /Users/ndainoran/airflow_latest/airflow-automation/deid_runtime/failed_rows.db
 # .deid_staging/ is auto-placed next to state.db (same folder)
 
-state_db_url: "mysql+pymysql://${DEST_USER}:${DEST_PW}@localhost:3306/deid_state"
-failed_rows_db_url: "mysql+pymysql://${DEST_USER}:${DEST_PW}@localhost:3306/deid_failed"
+state_db_url: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/deid_state"
+failed_rows_db_url: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/deid_failed"
 
 # ── Redis ────────────────────────────────────────────────────────────
 redis_url: redis://localhost:6379/0
@@ -48,7 +48,7 @@ redis_url: redis://localhost:6379/0
 # ── De-Identification Settings ───────────────────────────────────────
 deidentification:
   batch_size: 50000
-  date_offset_days: 34
+  date_offset_days: ${DATE_OFFSET}
   patient_id_prefix: 10000000
   random_seed: 42
 
@@ -93,8 +93,8 @@ qc:
 
 # ── PII / Notes Config ───────────────────────────────────────────────
 pii_db:
-  master_connection_str: "mysql+pymysql://${DEST_USER}:${DEST_PW}@localhost:3306/master_pg"
-  secondary_pii_connection_str: "mysql+pymysql://${DEST_USER}:${DEST_PW}@localhost:3306/master_pg"
+  master_connection_str: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/master_pg"
+  secondary_pii_connection_str: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/master_pg"
 
 secondary_pii_config_path: /Users/ndainoran/airflow_latest/airflow-automation/Airflow/scripts/configs/noran/noran_secondary_pii_config.yaml
 

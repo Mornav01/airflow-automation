@@ -1,3 +1,4 @@
+import os
 import mysql.connector
 from faker import Faker
 from tqdm import tqdm
@@ -7,8 +8,8 @@ import random
 fake = Faker()
 connection = mysql.connector.connect(
     host="localhost",
-    user="root",
-    password="Neuro@123",
+    user=os.environ.get("DB_USER", ""),
+    password=os.environ.get("DB_PASS", ""),
     database="ndsource",
 )
 MAX_ROW_COUNT = 100000

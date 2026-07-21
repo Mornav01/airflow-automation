@@ -32,6 +32,7 @@ This installs all required packages including:
 - `celery`, `redis` — task queue
 - `polars`, `pandas`, `pyarrow` — data processing
 - `sqlalchemy`, `pymssql`, `pymysql` — database drivers
+- `snowflake-connector-python`, `snowflake-sqlalchemy` — AthenaOne Snowflake ingestion
 - `spacy`, `presidio-analyzer` — NLP/PII detection
 - `pydantic`, `typer` — config and CLI
 
@@ -83,7 +84,7 @@ SOURCE_USER=sa
 SOURCE_PW=your_mssql_password
 
 # Destination DB (MySQL)
-DEST_USER=ndadmin
+DEST_USER=<mysql_user>
 DEST_PW=your_mysql_password
 
 # Python executable (used by manual script and Airflow DAG)

@@ -1,5 +1,7 @@
 import csv
 import os
+import threading
+import concurrent.futures
 import sqlalchemy
 from pathlib import Path
 from sqlalchemy import text
@@ -118,22 +120,23 @@ class AddNdColumns:
     # ── Per-table runner ───────────────────────────────────────────────────────
 
     @classmethod
-    def run_table(cls, table_name: str, log: dict):
+    def run_table(cls, table_name: str, log: dict, lock: threading.Lock,
+                  engine: sqlalchemy.Engine):
         """
         Runs all 3 column operations for the given table inside a single
         transaction.  Skips the table if it already has a 'success' entry in
         the log CSV.  Logs the result (success / failure) after each table.
         """
-        if log.get(table_name, {}).get("status") == "success":
-            print(f"[SKIP] {table_name} — already succeeded, skipping.")
-            return
+        with lock:
+            if log.get(table_name, {}).get("status") == "success":
+                print(f"[SKIP] {table_name} — already succeeded, skipping.")
+                return
 
         print(f"[RUN]  {table_name} — adding nd columns...")
         status    = "failure"
         error_msg = ""
 
         try:
-            engine = sqlalchemy.create_engine(CONNECTION_STRING)
             with engine.begin() as conn:
                 cls._add_nd_auto_increment_id(conn, table_name)
                 cls._add_nd_extracted_date(conn, table_name)
@@ -145,23 +148,48 @@ class AddNdColumns:
             error_msg = str(e)
             print(f"[FAIL] {table_name} — {error_msg}")
 
-        log[table_name] = {
-            "table_name": table_name,
-            "status":     status,
-            "timestamp":  datetime.now(timezone.utc).isoformat(),
-            "error":      error_msg,
-        }
-        cls._write_log(log)
+        with lock:
+            log[table_name] = {
+                "table_name": table_name,
+                "status":     status,
+                "timestamp":  datetime.now(timezone.utc).isoformat(),
+                "error":      error_msg,
+            }
+            cls._write_log(log)
 
     # ── Entry point ────────────────────────────────────────────────────────────
 
     @classmethod
-    def run_all(cls):
+    def run_all(cls, max_workers: int = 8):
         tables = cls._load_tables()
         log    = cls._load_log()
-        print(f"Processing {len(tables)} table(s) from '{TABLES_INPUT_FILE}'...\n")
-        for table in tables:
-            cls.run_table(table, log)
+        lock   = threading.Lock()
+
+        # Shared engine — pool_size matches thread count; no per-table connection setup.
+        engine = sqlalchemy.create_engine(
+            CONNECTION_STRING,
+            pool_size=max_workers,
+            max_overflow=10,
+            pool_pre_ping=True,
+            pool_recycle=1800,
+        )
+
+        print(f"Processing {len(tables)} table(s) from '{TABLES_INPUT_FILE}' "
+              f"with max_workers={max_workers}...\n")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(cls.run_table, table, log, lock, engine): table
+                for table in tables
+            }
+            for future in concurrent.futures.as_completed(futures):
+                table = futures[future]
+                try:
+                    future.result()
+                except Exception as e:
+                    print(f"[ERROR] {table} — unhandled exception: {e}")
+
+        engine.dispose()
 
 
 if __name__ == "__main__":

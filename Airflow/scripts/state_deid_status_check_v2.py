@@ -22,6 +22,7 @@ state_db_path, and source/destination connection strings.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import csv
 import json
 import logging
@@ -29,6 +30,7 @@ import os
 import re
 import sys
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 
 import sqlalchemy as sa
@@ -72,7 +74,7 @@ def _interpolate(obj):
 def _conn_str(db_cfg: dict) -> str:
     drivers = {
         "mysql":      "mysql+pymysql",
-        "mssql":      "mssql+pymssql",
+        "mssql":      "mssql+pyodbc",
         "postgresql": "postgresql+psycopg2",
     }
     driver = drivers[db_cfg["type"]]
@@ -81,7 +83,11 @@ def _conn_str(db_cfg: dict) -> str:
     h = db_cfg["host"]
     port = db_cfg["port"]
     db = db_cfg["database"]
-    return f"{driver}://{u}:{p}@{h}:{port}/{db}"
+    conn = f"{driver}://{u}:{p}@{h}:{port}/{db}"
+    if db_cfg["type"] == "mssql":
+        odbc_driver = db_cfg.get("driver", "ODBC Driver 17 for SQL Server").replace(" ", "+")
+        conn += f"?driver={odbc_driver}&TrustServerCertificate=yes"
+    return conn
 
 
 def load_deid_config(config_yaml_path: str) -> dict:
@@ -146,8 +152,27 @@ class StateManager:
 # ===================== HELPERS ==============================
 # ============================================================
 
+@lru_cache(maxsize=8)
+def _get_engine(conn_str: str) -> sa.engine.Engine:
+    return sa.create_engine(
+        conn_str,
+        pool_pre_ping=True,
+        pool_size=8,
+        max_overflow=0,
+        pool_recycle=1800,
+    )
+
+
+@lru_cache(maxsize=4)
+def _get_sqlite_engine(state_db_path: str) -> sa.engine.Engine:
+    return sa.create_engine(
+        f"sqlite:///{state_db_path}",
+        connect_args={"check_same_thread": False},
+    )
+
+
 def get_row_count(conn_str: str, table_name: str) -> int:
-    engine = sa.create_engine(conn_str, pool_pre_ping=True)
+    engine = _get_engine(conn_str)
     quoted = engine.dialect.identifier_preparer.quote(table_name)
     with engine.connect() as conn:
         result = conn.execute(sa.text(f"SELECT COUNT(*) FROM {quoted}"))
@@ -168,10 +193,7 @@ def check_table_in_state_db(
 
     Returns (None, None) if the table is not found in state.db.
     """
-    engine = sa.create_engine(
-        f"sqlite:///{state_db_path}",
-        connect_args={"check_same_thread": False},
-    )
+    engine = _get_sqlite_engine(state_db_path)
     with engine.connect() as conn:
         row = conn.execute(
             sa.text("""
@@ -275,6 +297,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config-yaml",      required=True, help="Path to deid v2 config.yaml")
     parser.add_argument("--tables-filepath",  required=True, help="Path to tables CSV")
+    parser.add_argument("--max-workers",      type=int, default=8,
+                        help="Parallel threads for status checks (default: 8)")
     args = parser.parse_args()
 
     setup_logging(STATE_DIR)
@@ -295,7 +319,8 @@ def main():
         else Path(raw_state_db)
     )
 
-    logging.info("config_key=%s  state_db=%s", config_key, state_db_path)
+    logging.info("config_key=%s  state_db=%s  max_workers=%d",
+                 config_key, state_db_path, args.max_workers)
 
     # ── Read table list ───────────────────────────────────────
     with open(args.tables_filepath, newline="") as f:
@@ -305,7 +330,7 @@ def main():
 
     state_manager = StateManager(STATE_DIR)
 
-    for table in tables:
+    def _check(table):
         process_table(
             table_name=table,
             config_key=config_key,
@@ -314,6 +339,15 @@ def main():
             dest_conn=dest_conn,
             state_manager=state_manager,
         )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.max_workers) as executor:
+        futures = {executor.submit(_check, table): table for table in tables}
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                future.result()
+            except Exception:
+                table = futures[future]
+                logging.exception("[%s] unexpected error during status check", table)
 
     logging.info("Status check complete")
 

@@ -1,0 +1,42 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# eCW — v5 mapping structural config
+# Consumed by:  incremental_mapping_update_v5.py --config <this file>
+#               --staging_schema <delta> --mapping_schema <mapping> (pipeline mode)
+#
+# Replaces the legacy scripts/ecw/mapping_delta.py. In pipeline mode the source
+# connection is built from SOURCE_DB_* (reading the staging/delta schema) and the
+# destination from DB_* (the MySQL mapping schema) — no MAPPING_SOURCE_* /
+# MAPPING_DEST_* vars are needed.
+#
+# sql_file paths are RELATIVE to scripts/ (the DAG runs v5 with cwd=scripts/).
+# The staging dialect is NOT set here — in pipeline mode v5 reads it from
+# SOURCE_DB_TYPE in .env (single per-deployment edit). eCW clients default to
+# MySQL staging; set SOURCE_DB_TYPE=mssql in .env if a client's staging is MSSQL.
+#
+# Structure matches mapping_pg (scripts/sql/mapping_migration_to_new_structure_greenway_ecw.sql):
+#   patient_mapping_table   : patientid (source uid), nd_patient_id, offset, registration_date
+#   encounter_mapping_table : child, linked by patientid
+# ══════════════════════════════════════════════════════════════════════════════
+
+patient:
+  sql_file: sql/ecw/patient_mapping.sql
+  identifier_columns:
+    - patientid
+  # nd_patient_id seed used ONLY when patient_mapping_table is empty (fresh client
+  # bootstrap). On an already-populated table the next id continues from MAX+1 and
+  # this value is unused. Set to the client's allocated 15-digit base when bootstrapping.
+  base_nd_id: 100100140000001
+
+child_tables:
+  - name: encounter
+    sql_file: sql/ecw/encounter_mapping.sql
+    patient_ref_cols:
+      - patientid
+    source_id_col: encounter_id
+    date_col: encounter_date
+    # suffix_len 4 → nd_encounter_id = {nd_patient_id}0001 == nd_patient_id*10000+1,
+    # matching the id scheme the legacy mapping_delta.py used, so existing tables
+    # continue cleanly.
+    nd_id_suffix_len: 4
+    mapping_table: encounter_mapping_table
+    nd_id_col: nd_encounter_id

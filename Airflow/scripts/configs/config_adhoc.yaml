@@ -4,31 +4,31 @@ source_db:
   host: localhost
   port: 3306
   database: mobiledoc_sep
-  username: ndadmin
-  password: ndADMIN%402025
+  username: ${DB_USER}
+  password: ${DB_PASS}
 
 destination_db:
   type: mysql
   host: localhost
   port: 3306
   database: test_deid
-  username: ndadmin
-  password: ndADMIN%402025
+  username: ${DB_USER}
+  password: ${DB_PASS}
 
 mappings_db:
   type: mysql
   host: localhost
   port: 3306
   database: mapping_latest
-  username: ${DEST_USER}
-  password: ${DEST_PW}
+  username: ${DB_USER}
+  password: ${DB_PASS}
 
 # ── Namespace Key ────────────────────────────────────────────────────
 config_key: adhoc
 
 # ── State Storage ────────────────────────────────────────────────────
-state_db_path: /Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/deid_runtime/state.db
-failed_rows_db_path: /Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/deid_runtime/failed_rows.db
+state_db_path: ${LOG_DIR}/state.db
+failed_rows_db_path: ${LOG_DIR}/failed_rows.db
 # .deid_staging/ is auto-placed next to state.db (same folder)
 
 # ── Redis ────────────────────────────────────────────────────────────
@@ -37,18 +37,20 @@ redis_url: redis://localhost:6379/0
 # ── De-Identification Settings ───────────────────────────────────────
 deidentification:
   batch_size: 100000
-  date_offset_days: 34
+  date_offset_days: ${DATE_OFFSET}
   patient_id_prefix: 10000000
   random_seed: 42
 
 # ── Tables & Rules ───────────────────────────────────────────────────
-rules_csv: /Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/Airflow/scripts/configs/arizona_config_rules.csv
+rules_csv: ${RULES_CSV}
 
 # ── Mapping Tables ───────────────────────────────────────────────────
 mapping_tables:
   patient:
-    source_column: patient_id
+    source_column: patientid
     destination_column: nd_patient_id
+    identifier_columns:
+      - patientid   # update to match actual columns in patient_mapping_table
   encounter:
     source_column: encounter_id
     destination_column: nd_encounter_id
@@ -68,7 +70,7 @@ workers:
 
 # ── Logging ──────────────────────────────────────────────────────────
 logging:
-  log_dir: /Users/ndaicnsarizona/Desktop/production_state_incremental/state/deidentification/logs/adhoc
+  log_dir: ${LOG_DIR}/adhoc
 
 # ── Quality Control ──────────────────────────────────────────────────
 qc:
@@ -77,12 +79,12 @@ qc:
 
 # ── PII / Notes Config ───────────────────────────────────────────────
 pii_db:
-  master_connection_str: "mysql+pymysql://${DEST_USER}:${DEST_PW}@localhost:3306/master_sep"
-  secondary_pii_connection_str: "mysql+pymysql://${DEST_USER}:${DEST_PW}@localhost:3306/master_sep"
+  master_connection_str: "mysql+pymysql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${MASTER_DB_NAME}"
+  secondary_pii_connection_str: "mysql+pymysql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${MASTER_DB_NAME}"
 
-secondary_pii_config_path: /Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/Airflow/scripts/configs/arizona_secondary_pii_config.yaml
+secondary_pii_config_path: ${SECONDARY_PII_YAML}
 
-pii_config_path: /Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/Airflow/scripts/configs/arizona_pii_config.yaml
+pii_config_path: ${PII_YAML}
 
 # ── Reference Mapping Joins ───────────────────────────────────────────
-reference_mappings_path: /Users/ndaicnsarizona/Documents/Karan/airflowdeidentifcation/deidentification/Airflow/scripts/configs/ecw_reference_mappings.yaml
+reference_mappings_path: ${REF_MAPPING_YAML}

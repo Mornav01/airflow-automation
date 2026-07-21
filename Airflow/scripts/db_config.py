@@ -1,95 +1,170 @@
 """
 Central configuration.
 Loads all settings from Airflow/.env
+
+NOTE: python-dotenv on some versions does NOT expand ${VAR} references within
+the same .env file.  All composite values are therefore built here in Python
+from the primitive env vars that carry literal values.
 """
 
 import os
+import re
+import logging
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).parent.parent / ".env")
+logger = logging.getLogger(__name__)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Load .env at parse time so os.environ.get() calls below work correctly even
+# when the Airflow worker process doesn't inherit the shell environment.
+# Uses setdefault — does NOT override values already set in the environment.
+# ──────────────────────────────────────────────────────────────────────────────
+def _load_env_file(path: str) -> None:
+    try:
+        with open(path) as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if not _line or _line.startswith("#") or "=" not in _line:
+                    continue
+                _key, _, _val = _line.partition("=")
+                _key = _key.strip()
+                _val = _val.strip()
+                # Quoted value: take the literal contents and ignore anything
+                # after the closing quote (e.g. a trailing inline comment).
+                if _val[:1] in ("'", '"'):
+                    _q = _val[0]
+                    _end = _val.find(_q, 1)
+                    _val = _val[1:_end] if _end != -1 else _val[1:]
+                else:
+                    # Unquoted: strip an inline comment — '#' preceded by
+                    # whitespace (dotenv semantics). A '#' with no preceding
+                    # space (e.g. inside a password/token) is kept.
+                    _c = re.search(r"\s#", _val)
+                    if _c:
+                        _val = _val[:_c.start()]
+                    _val = _val.strip()
+                os.environ.setdefault(_key, _val)
+    except FileNotFoundError:
+        logger.warning("No .env file found at %s", path)
+
+
+_load_env_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
+
+# ── Primitive env vars — literal values, no ${VAR} expansion needed ─────────────
+# SOURCE_DB_* = the client source DB (read side). DB_* = the local MySQL working
+# DB (write side). SOURCE_DB_HOST falls back to DB_HOST (source is usually local);
+# PROD_HOST (remote prod MSSQL for mapping/master) falls back to SOURCE_DB_HOST.
+_SOURCE_USER  = os.environ.get("SOURCE_DB_USER", "")
+_SOURCE_PW    = os.environ.get("SOURCE_DB_PASS", "")
+_DB_USER      = os.environ.get("DB_USER", "")
+_DB_PASS      = os.environ.get("DB_PASS", "")
+_DB_HOST      = os.environ.get("DB_HOST", "localhost")
+_SOURCE_HOST  = os.environ.get("SOURCE_DB_HOST") or _DB_HOST
+_SOURCE_PORT  = os.environ.get("SOURCE_DB_PORT", "1433")
+_DB_PORT      = os.environ.get("DB_PORT", "3306")
+# PROD_* = the remote upstream prod MSSQL (read by the diff/merge + mapping/master
+# scripts). Each falls back to its SOURCE_DB_* counterpart when unset, so a
+# same-credentials remote needs only PROD_HOST; set PROD_USER/PROD_PASS/PROD_PORT
+# only when the remote prod uses DIFFERENT credentials or port than the source DB.
+_PROD_HOST    = os.environ.get("PROD_HOST") or _SOURCE_HOST
+_PROD_USER    = os.environ.get("PROD_USER") or _SOURCE_USER
+_PROD_PW      = os.environ.get("PROD_PASS") or _SOURCE_PW
+_PROD_PORT    = os.environ.get("PROD_PORT") or _SOURCE_PORT
+
+_BASE_DB_NAME    = os.environ.get("BASE_DB_NAME", "")
+_PROD_DB_NAME    = os.environ.get("PROD_DB_NAME", "")
+_STAGING_DB_NAME = os.environ.get("STAGING_DB_NAME", "")
+_MERGED_DB_NAME  = os.environ.get("MERGED_DB_NAME", "")
+_MAPPING_DB_NAME = os.environ.get("MAPPING_DB_NAME", "mapping")
+_MASTER_DB_NAME  = os.environ.get("MASTER_DB_NAME", "master")
+_DEID_BASE_NAME    = os.environ.get("DEID_BASE_NAME", "deidentified")
+_DEID_STAGING_NAME = os.environ.get("DEID_STAGING_NAME", "deidentified_staging")
+_DEID_MERGED_NAME  = os.environ.get("DEID_MERGED_NAME", "deidentified_merged")
+
+# ODBC driver name — configurable per machine (installs vary: Driver 17 vs 18).
+# Set ODBC_DRIVER in .env to override; spaces are URL-encoded to '+' for the
+# pyodbc/SQLAlchemy query string. `odbcinst -q -d` lists installed drivers.
+_ODBC_DRIVER = os.environ.get("ODBC_DRIVER", "ODBC Driver 17 for SQL Server")
+_ODBC = f"?driver={_ODBC_DRIVER.replace(' ', '+')}&TrustServerCertificate=yes"
 
 # ── State directory ─────────────────────────────────────────────
 STATE_DIR     = os.environ["STATE_DIR"]
-DEID_REPO_DIR = os.environ["DEID_REPO_DIR"]
+DEID_REPO_DIR = os.environ.get("DEID_REPO_DIR", "")
 
 # ── Merge config ────────────────────────────────────────────────
-PK_CSV                      = os.environ["PK_CSV"]
-HISTORICAL_DATA_DEFAULT_DATE = os.environ["HISTORICAL_DATA_DEFAULT_DATE"]
+PK_CSV                       = os.environ.get("PK_CSV", "")
+HISTORICAL_DATA_DEFAULT_DATE = os.environ.get("HISTORICAL_DATA_DEFAULT_DATE", "")
 
-# ── MSSQL ──────────────────────────────────────────────────────
-BASE_DB         = os.environ["BASE_DB"]
-PROD_DB         = os.environ["PROD_DB"]
-DIFF_STAGING_DB = os.environ["DIFF_STAGING_DB"]
-DIFFMERGED_CONN = os.environ["DIFFMERGED_CONN"]
+# ── MSSQL connection strings — built from primitives ───────────────────────────
+BASE_DB         = f"mssql+pyodbc://{_SOURCE_USER}:{_SOURCE_PW}@{_SOURCE_HOST}:{_SOURCE_PORT}/{_BASE_DB_NAME}{_ODBC}"
+PROD_DB         = f"mssql+pyodbc://{_PROD_USER}:{_PROD_PW}@{_PROD_HOST}:{_PROD_PORT}/{_PROD_DB_NAME}{_ODBC}"
+DIFF_STAGING_DB = f"mssql+pyodbc://{_SOURCE_USER}:{_SOURCE_PW}@{_SOURCE_HOST}:{_SOURCE_PORT}/{_STAGING_DB_NAME}{_ODBC}"
+DIFFMERGED_CONN = f"mssql+pyodbc://{_SOURCE_USER}:{_SOURCE_PW}@{_SOURCE_HOST}:{_SOURCE_PORT}/{_MERGED_DB_NAME}{_ODBC}"
 
 DB_TYPE     = "mssql"
 DIFF_SCHEMA = "dbo"
 
-# ── MySQL ───────────────────────────────────────────────────────
-MYSQL_DEID_BASE_CONN       = os.environ["DEID_BASE_CONN"]
-MYSQL_DEID_STAGING_CONN    = os.environ["DEID_STAGING_CONN"]
-MYSQL_DEID_DIFFMERGED_CONN = os.environ["DEID_DIFFMERGED_CONN"]
-
+# ── MySQL connection strings — built from primitives ───────────────────────────
+MYSQL_DEID_BASE_CONN       = f"mysql+pymysql://{_DB_USER}:{_DB_PASS}@{_DB_HOST}:{_DB_PORT}/{_DEID_BASE_NAME}"
+MYSQL_DEID_STAGING_CONN    = f"mysql+pymysql://{_DB_USER}:{_DB_PASS}@{_DB_HOST}:{_DB_PORT}/{_DEID_STAGING_NAME}"
+MYSQL_DEID_DIFFMERGED_CONN = f"mysql+pymysql://{_DB_USER}:{_DB_PASS}@{_DB_HOST}:{_DB_PORT}/{_DEID_MERGED_NAME}"
 
 # ── Deid config ──────────────────────────────────────────────────
-DBDETAILSMODEL_NAME = os.environ["DBDETAILSMODEL_NAME"]
-PROJECT_NAME = os.environ["PROJECT_NAME"]
+DBDETAILSMODEL_NAME = os.environ.get("DBDETAILSMODEL_NAME", "")
 
 # ── Tables CSV (per DAG) ─────────────────────────────────────────
-DIFF_MERGE_TABLES_CSV        = os.environ["DIFF_MERGE_TABLES_CSV"]
-DEID_TABLES_CSV              = os.environ["DEID_TABLES_CSV"]
-DEID_POST_PROCESS_TABLES_CSV = os.environ["DEID_POST_PROCESS_TABLES_CSV"]
+DIFF_MERGE_TABLES_CSV        = os.environ.get("DIFF_MERGE_TABLES_CSV", "")
+DEID_TABLES_CSV              = os.environ.get("DEID_TABLES_CSV", "")
+DEID_POST_PROCESS_TABLES_CSV = os.environ.get("DEID_POST_PROCESS_TABLES_CSV", "")
+
+# ── Mapping dict (mssql_incremental_mapping_update*.py) ─────────────────────────
+MAPPING_MSSQL_CONN = {
+    "server":   _PROD_HOST,
+    "port":     int(_PROD_PORT),
+    "database": _PROD_DB_NAME,
+    "user":     _PROD_USER,
+    "password": _PROD_PW,
+}
+MAPPING_MYSQL_CONN = {
+    "host":     _DB_HOST,
+    "database": _MAPPING_DB_NAME,
+    "user":     _DB_USER,
+    "password": _DB_PASS,
+}
+
+# ── Master recreate connection strings (mssql_incremental_master_recreate.py) ───
+MASTER_MSSQL_CONN_STR = f"mssql+pyodbc://{_PROD_USER}:{_PROD_PW}@{_PROD_HOST}:{_PROD_PORT}/{_PROD_DB_NAME}{_ODBC}"
+MASTER_MYSQL_CONN_STR = f"mysql+pymysql://{_DB_USER}:{_DB_PASS}@{_DB_HOST}:{_DB_PORT}/{_MASTER_DB_NAME}"
+
+MAPPING_SQL_FILE=''
+MASTER_PII_SQL_FILE=''
+MASTER_INSURANCE_SQL_FILE=''
 
 
-
-
-# ── AWS transfer (aws_transfer.py) ───────────────────────────────
-AWS_TRANSFER_MYSQL_HOST            = os.environ["AWS_TRANSFER_MYSQL_HOST"]
-AWS_TRANSFER_MYSQL_PORT            = os.environ["AWS_TRANSFER_MYSQL_PORT"]
-AWS_TRANSFER_MYSQL_USER            = os.environ["AWS_TRANSFER_MYSQL_USER"]
-AWS_TRANSFER_MYSQL_PASSWORD        = os.environ["AWS_TRANSFER_MYSQL_PASSWORD"]
-AWS_TRANSFER_MYSQL_SCHEMA          = os.environ["AWS_TRANSFER_MYSQL_SCHEMA"]
-AWS_TRANSFER_MYSQLDUMP_PATH        = os.environ["AWS_TRANSFER_MYSQLDUMP_PATH"]
-AWS_TRANSFER_MYSQL_PATH            = os.environ["AWS_TRANSFER_MYSQL_PATH"]
-AWS_TRANSFER_S3_BUCKET             = os.environ["AWS_TRANSFER_S3_BUCKET"]
-AWS_TRANSFER_S3_PREFIX             = os.environ["AWS_TRANSFER_S3_PREFIX"]
-AWS_TRANSFER_S3_REGION             = os.environ["AWS_TRANSFER_S3_REGION"]
-AWS_TRANSFER_AWS_ACCESS_KEY_ID     = os.environ["AWS_TRANSFER_AWS_ACCESS_KEY_ID"]
-AWS_TRANSFER_AWS_SECRET_ACCESS_KEY = os.environ["AWS_TRANSFER_AWS_SECRET_ACCESS_KEY"]
-AWS_TRANSFER_OUTPUT_BASE           = os.environ["AWS_TRANSFER_OUTPUT_BASE"]
-AWS_TRANSFER_COUNT_SCHEMA          = os.environ["AWS_TRANSFER_COUNT_SCHEMA"]
-AWS_TRANSFER_COUNT_REPORT_LABEL    = os.environ["AWS_TRANSFER_COUNT_REPORT_LABEL"]
-AWS_TRANSFER_COUNT_S3_PREFIX       = os.environ["AWS_TRANSFER_COUNT_S3_PREFIX"]
-
-
-# ── Mapping connections & config (v3 / v4 / v5) ──────────────────
-# Source DB — works for both MSSQL and MySQL sources (source_type in YAML picks the driver)
+# ── LEGACY COMPAT — athena / veradigm clients on the v3/v4/v5 engine ──────────
+# Role-based connection constants required by the legacy mapping/master scripts
+# (incremental_mapping_update_v3/v4/v5.py, master_recreate_v3.py) that predate
+# mind's engine-based (MYSQL/MSSQL) connection split. Read lazily via
+# os.environ.get so db_config stays importable for the new EHR pipelines (eCW /
+# Greenway / MIND), which do not set these vars. Remove once these clients are
+# re-ported onto the delta-based architecture.
 MAPPING_SOURCE_CONN = {
-    "host":     os.environ["MAPPING_SOURCE_HOST"],
+    "host":     os.environ.get("MAPPING_SOURCE_HOST", ""),
     "port":     int(os.environ.get("MAPPING_SOURCE_PORT", "1433")),
-    "database": os.environ["MAPPING_SOURCE_DATABASE"],
-    "user":     os.environ["MAPPING_SOURCE_USER"],
-    "password": os.environ["MAPPING_SOURCE_PASSWORD"],
+    "database": os.environ.get("MAPPING_SOURCE_DATABASE", ""),
+    "user":     os.environ.get("MAPPING_SOURCE_USER", ""),
+    "password": os.environ.get("MAPPING_SOURCE_PASSWORD", ""),
 }
-# Destination DB — always MySQL
 MAPPING_DEST_CONN = {
-    "host":     os.environ["MAPPING_DEST_HOST"],
-    "database": os.environ["MAPPING_DEST_DATABASE"],
-    "user":     os.environ["MAPPING_DEST_USER"],
-    "password": os.environ["MAPPING_DEST_PASSWORD"],
+    "host":     os.environ.get("MAPPING_DEST_HOST", ""),
+    "database": os.environ.get("MAPPING_DEST_DATABASE", ""),
+    "user":     os.environ.get("MAPPING_DEST_USER", ""),
+    "password": os.environ.get("MAPPING_DEST_PASSWORD", ""),
 }
-MAPPING_CONFIG_FILE = os.environ["MAPPING_CONFIG_FILE"]
-
-# ── Master recreate — connection strings (v3 / v4 / v5) ──────────
-MASTER_SOURCE_CONN_STR  = os.environ["MASTER_SOURCE_CONN"]    # source DB (mssql+pymssql:// or mysql+pymysql://)
-MASTER_DEST_CONN_STR    = os.environ["MASTER_DEST_CONN"]      # destination MySQL (where master tables are written)
-MASTER_MAPPING_CONN_STR = os.environ["MASTER_MAPPING_CONN"]   # mapping MySQL (where patient_mapping_table lives)
-
-# ── DAG Schedules (None = manual trigger only) ──────────────────
-DIFF_MERGE_SCHEDULE        = os.environ.get("DIFF_MERGE_SCHEDULE") or None
-DEID_SCHEDULE              = os.environ.get("DEID_SCHEDULE") or None
-DEID_POST_PROCESS_SCHEDULE = os.environ.get("DEID_POST_PROCESS_SCHEDULE") or None
-AWS_TRANSFER_SCHEDULE      = os.environ.get("AWS_TRANSFER_SCHEDULE") or None
-GCP_TRANSFER_SCHEDULE      = os.environ.get("GCP_TRANSFER_SCHEDULE") or None
+MAPPING_CONFIG_FILE     = os.environ.get("MAPPING_CONFIG_FILE", "")
+MASTER_SOURCE_CONN_STR  = os.environ.get("MASTER_SOURCE_CONN", "")
+MASTER_DEST_CONN_STR    = os.environ.get("MASTER_DEST_CONN", "")
+MASTER_MAPPING_CONN_STR = os.environ.get("MASTER_MAPPING_CONN", "")
