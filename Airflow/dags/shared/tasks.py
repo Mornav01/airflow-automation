@@ -292,7 +292,10 @@ def task_s3_transfer(**context):
         date_folder = datetime.strptime(run_date, "%Y-%m-%d").strftime("%m%d%Y")
     except ValueError:
         raise RuntimeError(f"Invalid run_date format: {run_date}. Expected YYYY-MM-DD")
-    destination_prefix = f"EHR/{date_folder}"
+    # Base S3 folder is maintained centrally in .env (differs per EHR); the
+    # per-run date folder is appended here.
+    dest_base = os.environ.get("S3_DESTINATION_PREFIX", "EHR").strip("/")
+    destination_prefix = f"{dest_base}/{date_folder}"
 
     cmd = [
         _deid_python(), script,

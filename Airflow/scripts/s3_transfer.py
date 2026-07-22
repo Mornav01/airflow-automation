@@ -60,6 +60,9 @@ AWS_ACCESS_KEY_ID     = os.environ.get("AWS_ACCESS_KEY_ID") or None
 AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY") or None
 AWS_REGION            = os.environ.get("AWS_REGION") or None
 S3_BUCKET             = os.environ.get("S3_BUCKET") or None
+# Base S3 folder (per-run date folder appended by the caller). Maintained
+# centrally in .env; differs per EHR (e.g. "EHR", "tables").
+S3_DESTINATION_PREFIX = os.environ.get("S3_DESTINATION_PREFIX", "EHR").strip("/")
 
 
 # ---------------------------------------------------------------------------
@@ -424,7 +427,7 @@ def main():
             sys.exit(1)
 
         os.makedirs(args.base_path, exist_ok=True)
-        destination_prefix = args.destination_prefix or f"EHR/{date_folder}"
+        destination_prefix = args.destination_prefix or f"{S3_DESTINATION_PREFIX}/{date_folder}"
 
         logger.info(
             f"Starting S3 transfer: schema={args.schema}, date={args.run_date}, "
