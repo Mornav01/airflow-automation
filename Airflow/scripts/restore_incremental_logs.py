@@ -48,6 +48,16 @@ Either way, the apply loop is idempotent and self-correcting: SQL Server's own
 "too early" (already applied → skip) / "too recent" (gap → stop) errors are the
 final guard.
 
+Cutoff (``RESTORE_CUTOFF_TS``)
+------------------------------
+Only logs whose filename timestamp (``_YYYYMMDD_HHMMSS``) is at or before the
+cutoff are applied; anything after it is skipped for this run.  This avoids
+half-applying a day whose backups are still in progress.  The default cutoff is
+**yesterday 00:00:00 (local)** — e.g. a run on the 22nd applies logs up to and
+including ``_20260721_000000`` and skips everything later.  Override with an
+explicit ``RESTORE_CUTOFF_TS=YYYYMMDD_HHMMSS``, or disable it entirely with
+``RESTORE_CUTOFF_TS=none`` to apply every discovered log.
+
 check_db_availability.py imports DB_CONFIGS and the connection settings from this
 module so there is a single source of truth.
 """
@@ -58,7 +68,7 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional, Set, Tuple
 
@@ -80,6 +90,9 @@ DATA_LOGS_DIR = os.getenv("DATA_LOGS_DIR", "")
 ORDER_MODE = os.getenv("RESTORE_ORDER_MODE", "lsn").strip().lower()
 # Search trn_dir recursively (default) or only its top level.
 TRN_RECURSIVE = os.getenv("RESTORE_TRN_RECURSIVE", "1").lower() in ("1", "true", "yes")
+# Only apply logs at/before this cutoff — see the module docstring. Raw env value;
+# resolved (with the yesterday-midnight default) by _cutoff_ts().
+CUTOFF_TS_RAW = os.getenv("RESTORE_CUTOFF_TS", "").strip()
 
 BACKUP_TYPE_LOG = 2  # RESTORE HEADERONLY BackupType for a transaction-log backup
 
@@ -206,6 +219,53 @@ def get_trn_files_from_container(container: str, dir_path: str, recursive: bool 
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                          universal_newlines=True, check=True)
     return [line.strip() for line in res.stdout.splitlines() if line.strip()]
+
+
+# ──────────────────────────────────────────────────────────────
+# Cutoff (skip logs newer than a point in time)
+# ──────────────────────────────────────────────────────────────
+_DISABLE_CUTOFF = {"none", "off", "0", "disable", "disabled", "no"}
+
+
+def _cutoff_ts() -> Optional[str]:
+    """Resolve the cutoff timestamp string (``YYYYMMDD_HHMMSS``), or None to
+    disable.  Defaults to yesterday 00:00:00 (local) so the current, still
+    in-progress day is never partially applied."""
+    if CUTOFF_TS_RAW.lower() in _DISABLE_CUTOFF:
+        return None
+    if CUTOFF_TS_RAW:
+        if not re.fullmatch(r"\d{8}_\d{6}", CUTOFF_TS_RAW):
+            raise ValueError(
+                f"RESTORE_CUTOFF_TS must be YYYYMMDD_HHMMSS or 'none', got {CUTOFF_TS_RAW!r}"
+            )
+        return CUTOFF_TS_RAW
+    return (datetime.now() - timedelta(days=1)).strftime("%Y%m%d") + "_000000"
+
+
+def filter_trn_files_by_cutoff(trn_files: List[str], cutoff: Optional[str], db_name: str) -> List[str]:
+    """Keep only .trn files whose filename timestamp is at or before *cutoff*.
+
+    Fixed-width ``_YYYYMMDD_HHMMSS`` timestamps compare correctly as strings.  A
+    file with no parseable timestamp is kept (the cutoff can't judge it) and the
+    downstream LSN chain check remains the final guard."""
+    if not cutoff:
+        return trn_files
+    kept: List[str] = []
+    dropped = 0
+    for f in trn_files:
+        m = re.search(r"_(\d{8}_\d{6})", os.path.basename(f))
+        if m is None:
+            logger.warning("%s: no timestamp in %s — keeping (cutoff cannot apply).",
+                           db_name, os.path.basename(f))
+            kept.append(f)
+        elif m.group(1) <= cutoff:
+            kept.append(f)
+        else:
+            dropped += 1
+    if dropped:
+        logger.info("%s: cutoff %s — skipping %d log(s) after it, keeping %d.",
+                    db_name, cutoff, dropped, len(kept))
+    return kept
 
 
 # ──────────────────────────────────────────────────────────────
@@ -425,6 +485,11 @@ def process_database(config: dict) -> None:
     trn_files = get_trn_files_from_container(SQLCMD_CONTAINER, config["trn_dir"], TRN_RECURSIVE)
     if not trn_files:
         logger.info("No .trn files found under %s for %s — skipping.", config["trn_dir"], config["db_name"])
+        return
+
+    trn_files = filter_trn_files_by_cutoff(trn_files, _cutoff_ts(), config["db_name"])
+    if not trn_files:
+        logger.info("No .trn files at/before cutoff for %s — skipping.", config["db_name"])
         return
 
     if ORDER_MODE == "filename":
