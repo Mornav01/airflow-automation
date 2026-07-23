@@ -26,9 +26,9 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import quote_plus
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ _JOIN_COL = "patientid"
 
 def create_mysql_engine(schema: str):
     """Engine for the master / mapping schemas (local MySQL, DB_* family)."""
-    url = f"mysql+pymysql://{quote_plus(_DB_USER)}:{quote_plus(_DB_PASS)}@{_DB_HOST}:{_DB_PORT}/{schema}"
+    url = URL.create("mysql+pymysql", username=_DB_USER, password=_DB_PASS, host=_DB_HOST, port=_DB_PORT, database=schema)
     return create_engine(url, pool_recycle=3600, pool_pre_ping=True)
 
 
@@ -54,7 +54,7 @@ def build_source_engine(schema: str):
     user = os.environ.get("ATHENAONE_MYSQL_USER") or _DB_USER
     password = os.environ.get("ATHENAONE_MYSQL_PASSWORD") or _DB_PASS
     host = os.environ.get("ATHENAONE_MYSQL_HOST") or _DB_HOST
-    url = f"mysql+pymysql://{quote_plus(user)}:{quote_plus(password)}@{host}:3306/{schema}"
+    url = URL.create("mysql+pymysql", username=user, password=password, host=host, port=3306, database=schema)
     return create_engine(url, pool_recycle=3600, pool_pre_ping=True)
 
 

@@ -16,6 +16,7 @@ import re
 import zlib
 from Crypto.Cipher import Blowfish
 from sqlalchemy import create_engine, text, MetaData, Table, Column, select, Text, func
+from sqlalchemy.engine import URL
 from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlalchemy.dialects.mssql import NVARCHAR
 from tqdm import tqdm
@@ -98,18 +99,21 @@ def process_row_batch(row_dicts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def build_engine(db_type: str, db_host: str, db_user: str, db_pass: str, schema: str, db_port: int = None):
-    from urllib.parse import quote_plus
     if db_type == "mssql":
         port = db_port or int(os.environ.get("SOURCE_DB_PORT", 1433))
-        odbc_driver = os.environ.get("ODBC_DRIVER", "ODBC Driver 17 for SQL Server").replace(" ", "+")
-        url = (
-            f"mssql+pyodbc://{quote_plus(db_user)}:{quote_plus(db_pass)}"
-            f"@{db_host}:{port}/{schema}"
-            f"?driver={odbc_driver}&TrustServerCertificate=yes"
+        odbc_driver = os.environ.get("ODBC_DRIVER", "ODBC Driver 17 for SQL Server")
+        url = URL.create(
+            "mssql+pyodbc",
+            username=db_user,
+            password=db_pass,
+            host=db_host,
+            port=port,
+            database=schema,
+            query={"driver": odbc_driver, "TrustServerCertificate": "yes"},
         )
     else:
         port = db_port or int(os.environ.get("SOURCE_DB_PORT", 3306))
-        url = f"mysql+pymysql://{db_user}:{quote_plus(db_pass)}@{db_host}:{port}/{schema}"
+        url = URL.create("mysql+pymysql", username=db_user, password=db_pass, host=db_host, port=port, database=schema)
     engine = create_engine(url, pool_size=5, max_overflow=10, pool_pre_ping=True)
     try:
         with engine.connect() as conn:

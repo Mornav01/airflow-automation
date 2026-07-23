@@ -144,7 +144,7 @@ with DAG(
         "deid_tables_csv":              DEID_TABLES_CSV,
         "deid_post_process_tables_csv": DEID_POST_PROCESS_TABLES_CSV,
         # S3 Transfer
-        "s3_deid_schema": os.environ.get("DEID_STAGING_NAME", "deidentified_staging"),
+        "s3_deid_schema": os.environ.get("DEID_MERGED_NAME", "deidentified_mobiledoc_diff_merged"),
         "parser_workers":  _CLIENT_CFG.get("parser_workers", None),
         # Control / parallelism — defaults from clients/<practice>.yaml
         "skip_restore":            _CLIENT_CFG.get("skip_restore", False),

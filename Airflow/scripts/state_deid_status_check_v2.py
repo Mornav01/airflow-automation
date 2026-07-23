@@ -85,7 +85,12 @@ def _conn_str(db_cfg: dict) -> str:
     db = db_cfg["database"]
     conn = f"{driver}://{u}:{p}@{h}:{port}/{db}"
     if db_cfg["type"] == "mssql":
-        odbc_driver = db_cfg.get("driver", "ODBC Driver 17 for SQL Server").replace(" ", "+")
+        # Prefer an explicit config `driver`; otherwise fall back to the central
+        # ODBC_DRIVER in .env (then to Driver 17 if neither is set).
+        odbc_driver = (
+            db_cfg.get("driver")
+            or os.environ.get("ODBC_DRIVER", "ODBC Driver 17 for SQL Server")
+        ).replace(" ", "+")
         conn += f"?driver={odbc_driver}&TrustServerCertificate=yes"
     return conn
 

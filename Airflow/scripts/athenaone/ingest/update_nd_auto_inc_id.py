@@ -6,6 +6,7 @@ Usage: Called from manual_pipeline_runner.py
 """
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
 import traceback
@@ -30,7 +31,7 @@ except ImportError as e:
     ) from e
 
 # Configuration
-MYSQL_CONN = f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}/information_schema"
+MYSQL_CONN = URL.create("mysql+pymysql", username=MYSQL_USER, password=MYSQL_PASSWORD, host=MYSQL_HOST, database="information_schema")
 historical_schema = HISTORICAL_SCHEMA
 incremental_schema = INCREMENTAL_SCHEMA
 

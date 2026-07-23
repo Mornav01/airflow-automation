@@ -25,6 +25,7 @@ import os
 from datetime import datetime, timezone
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL
 
 
 MYSQL_USER = os.environ.get("DB_USER", "")
@@ -47,18 +48,28 @@ logger = logging.getLogger(__name__)
 
 def create_mysql_engine(schema: str):
     """MySQL engine for master / mapping schemas (always MySQL)."""
-    url = f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASS}@{MYSQL_HOST}:{MYSQL_PORT}/{schema}"
+    url = URL.create(
+        "mysql+pymysql",
+        username=MYSQL_USER,
+        password=MYSQL_PASS,
+        host=MYSQL_HOST,
+        port=MYSQL_PORT,
+        database=schema,
+    )
     return create_engine(url, pool_recycle=3600, pool_pre_ping=True)
 
 
 def create_mssql_engine(schema: str):
     """MSSQL engine for the Greenway/PrimeSUITE staging source."""
-    from urllib.parse import quote_plus
-    odbc_driver = os.environ.get("ODBC_DRIVER", "ODBC Driver 17 for SQL Server").replace(" ", "+")
-    url = (
-        f"mssql+pyodbc://{quote_plus(MSSQL_USER)}:{quote_plus(MSSQL_PASS)}"
-        f"@{MSSQL_HOST}:{MSSQL_PORT}/{schema}"
-        f"?driver={odbc_driver}&TrustServerCertificate=yes"
+    odbc_driver = os.environ.get("ODBC_DRIVER", "ODBC Driver 17 for SQL Server")
+    url = URL.create(
+        "mssql+pyodbc",
+        username=MSSQL_USER,
+        password=MSSQL_PASS,
+        host=MSSQL_HOST,
+        port=MSSQL_PORT,
+        database=schema,
+        query={"driver": odbc_driver, "TrustServerCertificate": "yes"},
     )
     return create_engine(url, pool_recycle=3600, pool_pre_ping=True)
 
