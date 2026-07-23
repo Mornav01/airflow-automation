@@ -14,6 +14,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from db_url import make_conn_url, mssql_odbc_query
+
 logger = logging.getLogger(__name__)
 
 
@@ -85,10 +87,10 @@ _DEID_STAGING_NAME = os.environ.get("DEID_STAGING_NAME", "deidentified_staging")
 _DEID_MERGED_NAME  = os.environ.get("DEID_MERGED_NAME", "deidentified_merged")
 
 # ODBC driver name — configurable per machine (installs vary: Driver 17 vs 18).
-# Set ODBC_DRIVER in .env to override; spaces are URL-encoded to '+' for the
-# pyodbc/SQLAlchemy query string. `odbcinst -q -d` lists installed drivers.
+# Set ODBC_DRIVER in .env to override. `odbcinst -q -d` lists installed drivers.
+# Passed WITH spaces to make_conn_url — SQLAlchemy encodes it (do not pre-replace).
 _ODBC_DRIVER = os.environ.get("ODBC_DRIVER", "ODBC Driver 17 for SQL Server")
-_ODBC = f"?driver={_ODBC_DRIVER.replace(' ', '+')}&TrustServerCertificate=yes"
+_ODBC_QUERY = mssql_odbc_query(_ODBC_DRIVER)
 
 # ── State directory ─────────────────────────────────────────────
 STATE_DIR     = os.environ["STATE_DIR"]
@@ -98,19 +100,19 @@ DEID_REPO_DIR = os.environ.get("DEID_REPO_DIR", "")
 PK_CSV                       = os.environ.get("PK_CSV", "")
 HISTORICAL_DATA_DEFAULT_DATE = os.environ.get("HISTORICAL_DATA_DEFAULT_DATE", "")
 
-# ── MSSQL connection strings — built from primitives ───────────────────────────
-BASE_DB         = f"mssql+pyodbc://{_SOURCE_USER}:{_SOURCE_PW}@{_SOURCE_HOST}:{_SOURCE_PORT}/{_BASE_DB_NAME}{_ODBC}"
-PROD_DB         = f"mssql+pyodbc://{_PROD_USER}:{_PROD_PW}@{_PROD_HOST}:{_PROD_PORT}/{_PROD_DB_NAME}{_ODBC}"
-DIFF_STAGING_DB = f"mssql+pyodbc://{_SOURCE_USER}:{_SOURCE_PW}@{_SOURCE_HOST}:{_SOURCE_PORT}/{_STAGING_DB_NAME}{_ODBC}"
-DIFFMERGED_CONN = f"mssql+pyodbc://{_SOURCE_USER}:{_SOURCE_PW}@{_SOURCE_HOST}:{_SOURCE_PORT}/{_MERGED_DB_NAME}{_ODBC}"
+# ── MSSQL connection strings — built from RAW primitives (make_conn_url encodes) ─
+BASE_DB         = make_conn_url("mssql+pyodbc", username=_SOURCE_USER, password=_SOURCE_PW, host=_SOURCE_HOST, port=_SOURCE_PORT, database=_BASE_DB_NAME, query=_ODBC_QUERY)
+PROD_DB         = make_conn_url("mssql+pyodbc", username=_PROD_USER, password=_PROD_PW, host=_PROD_HOST, port=_PROD_PORT, database=_PROD_DB_NAME, query=_ODBC_QUERY)
+DIFF_STAGING_DB = make_conn_url("mssql+pyodbc", username=_SOURCE_USER, password=_SOURCE_PW, host=_SOURCE_HOST, port=_SOURCE_PORT, database=_STAGING_DB_NAME, query=_ODBC_QUERY)
+DIFFMERGED_CONN = make_conn_url("mssql+pyodbc", username=_SOURCE_USER, password=_SOURCE_PW, host=_SOURCE_HOST, port=_SOURCE_PORT, database=_MERGED_DB_NAME, query=_ODBC_QUERY)
 
 DB_TYPE     = "mssql"
 DIFF_SCHEMA = "dbo"
 
-# ── MySQL connection strings — built from primitives ───────────────────────────
-MYSQL_DEID_BASE_CONN       = f"mysql+pymysql://{_DB_USER}:{_DB_PASS}@{_DB_HOST}:{_DB_PORT}/{_DEID_BASE_NAME}"
-MYSQL_DEID_STAGING_CONN    = f"mysql+pymysql://{_DB_USER}:{_DB_PASS}@{_DB_HOST}:{_DB_PORT}/{_DEID_STAGING_NAME}"
-MYSQL_DEID_DIFFMERGED_CONN = f"mysql+pymysql://{_DB_USER}:{_DB_PASS}@{_DB_HOST}:{_DB_PORT}/{_DEID_MERGED_NAME}"
+# ── MySQL connection strings — built from RAW primitives (make_conn_url encodes) ─
+MYSQL_DEID_BASE_CONN       = make_conn_url("mysql+pymysql", username=_DB_USER, password=_DB_PASS, host=_DB_HOST, port=_DB_PORT, database=_DEID_BASE_NAME)
+MYSQL_DEID_STAGING_CONN    = make_conn_url("mysql+pymysql", username=_DB_USER, password=_DB_PASS, host=_DB_HOST, port=_DB_PORT, database=_DEID_STAGING_NAME)
+MYSQL_DEID_DIFFMERGED_CONN = make_conn_url("mysql+pymysql", username=_DB_USER, password=_DB_PASS, host=_DB_HOST, port=_DB_PORT, database=_DEID_MERGED_NAME)
 
 # ── Deid config ──────────────────────────────────────────────────
 DBDETAILSMODEL_NAME = os.environ.get("DBDETAILSMODEL_NAME", "")
@@ -136,8 +138,8 @@ MAPPING_MYSQL_CONN = {
 }
 
 # ── Master recreate connection strings (mssql_incremental_master_recreate.py) ───
-MASTER_MSSQL_CONN_STR = f"mssql+pyodbc://{_PROD_USER}:{_PROD_PW}@{_PROD_HOST}:{_PROD_PORT}/{_PROD_DB_NAME}{_ODBC}"
-MASTER_MYSQL_CONN_STR = f"mysql+pymysql://{_DB_USER}:{_DB_PASS}@{_DB_HOST}:{_DB_PORT}/{_MASTER_DB_NAME}"
+MASTER_MSSQL_CONN_STR = make_conn_url("mssql+pyodbc", username=_PROD_USER, password=_PROD_PW, host=_PROD_HOST, port=_PROD_PORT, database=_PROD_DB_NAME, query=_ODBC_QUERY)
+MASTER_MYSQL_CONN_STR = make_conn_url("mysql+pymysql", username=_DB_USER, password=_DB_PASS, host=_DB_HOST, port=_DB_PORT, database=_MASTER_DB_NAME)
 
 MAPPING_SQL_FILE=''
 MASTER_PII_SQL_FILE=''

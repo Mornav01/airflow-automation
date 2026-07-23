@@ -1,5 +1,6 @@
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
 from datetime import datetime, timedelta
@@ -49,7 +50,9 @@ snowflake_engine = create_engine(
 
 
 # MySQL connection
-mysql_engine = create_engine(f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}/{INCREMENTAL_SCHEMA}")
+mysql_engine = create_engine(
+    URL.create("mysql+pymysql", username=MYSQL_USER, password=MYSQL_PASSWORD, host=MYSQL_HOST, database=INCREMENTAL_SCHEMA)
+)
 
 # Setup logging
 def setup_logging():

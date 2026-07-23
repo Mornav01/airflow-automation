@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL
 from sqlalchemy.exc import SQLAlchemyError
 
 # Import configuration from Django model
 try:
     from config_loader import MYSQL_USER, MYSQL_PASSWORD, MYSQL_HOST, INCREMENTAL_SCHEMA
-    CONN_STR = f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}/{INCREMENTAL_SCHEMA}"
+    CONN_STR = URL.create("mysql+pymysql", username=MYSQL_USER, password=MYSQL_PASSWORD, host=MYSQL_HOST, database=INCREMENTAL_SCHEMA)
     SCHEMA = INCREMENTAL_SCHEMA
 except ImportError as e:
     raise RuntimeError(

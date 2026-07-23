@@ -188,15 +188,18 @@ def get_row_count(engine, db_name, schema_name, table_name):
 # ─────────────────────────────────────────────
 def check_databases(**context):
     from sqlalchemy import create_engine, text
+    from sqlalchemy.engine import URL
 
     queries = context["ti"].xcom_pull(task_ids="load_and_prepare", key="queries")
     db_conf = context["ti"].xcom_pull(task_ids="load_and_prepare", key="db_config")
 
     def get_conn_str(db_name):
-        return (
-            f"mssql+pyodbc://{db_conf['user']}:{db_conf['password']}"
-            f"@{db_conf['host']}:{db_conf['port']}/{db_name}"
-            "?driver=ODBC+Driver+17+for+SQL+Server"
+        # Raw creds in → URL.create percent-encodes every field (no manual escaping).
+        return URL.create(
+            "mssql+pyodbc",
+            username=db_conf["user"], password=db_conf["password"],
+            host=db_conf["host"], port=db_conf["port"], database=db_name,
+            query={"driver": os.environ.get("ODBC_DRIVER", "ODBC Driver 17 for SQL Server")},
         )
 
     # Collect all unique DB names referenced across queries + primary DB
@@ -249,6 +252,7 @@ def check_databases(**context):
 # ─────────────────────────────────────────────
 def execute_queries(**context):
     from sqlalchemy import create_engine, text
+    from sqlalchemy.engine import URL
 
     queries     = context["ti"].xcom_pull(task_ids="load_and_prepare",  key="queries")
     db_conf     = context["ti"].xcom_pull(task_ids="load_and_prepare",  key="db_config")
@@ -259,10 +263,12 @@ def execute_queries(**context):
     run_time    = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     def get_conn_str(db_name):
-        return (
-            f"mssql+pyodbc://{db_conf['user']}:{db_conf['password']}"
-            f"@{db_conf['host']}:{db_conf['port']}/{db_name}"
-            "?driver=ODBC+Driver+17+for+SQL+Server"
+        # Raw creds in → URL.create percent-encodes every field (no manual escaping).
+        return URL.create(
+            "mssql+pyodbc",
+            username=db_conf["user"], password=db_conf["password"],
+            host=db_conf["host"], port=db_conf["port"], database=db_name,
+            query={"driver": os.environ.get("ODBC_DRIVER", "ODBC Driver 17 for SQL Server")},
         )
 
     csv_rows     = []

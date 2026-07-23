@@ -26,6 +26,7 @@ import os
 from datetime import datetime, timezone
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL
 
 
 MYSQL_USER = os.environ.get("DB_USER", "")
@@ -47,27 +48,30 @@ logger = logging.getLogger(__name__)
 
 def create_mysql_engine(schema: str):
     """MySQL engine for master / mapping schemas (always MySQL)."""
-    url = f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASS}@{MYSQL_HOST}:{MYSQL_PORT}/{schema}"
+    url = URL.create("mysql+pymysql", username=MYSQL_USER, password=MYSQL_PASS, host=MYSQL_HOST, port=MYSQL_PORT, database=schema)
     return create_engine(url, pool_recycle=3600, pool_pre_ping=True)
 
 
 def build_source_engine(schema: str):
     """Engine for the eCW staging source — dialect controlled by SOURCE_DB_TYPE."""
-    from urllib.parse import quote_plus
     user = os.environ.get("SOURCE_DB_USER", "")
     password = os.environ.get("SOURCE_DB_PASS", "")
     host = os.environ.get("SOURCE_DB_HOST") or os.environ.get("DB_HOST", "localhost")
     if SOURCE_DB_TYPE == "mssql":
         port = int(os.environ.get("SOURCE_DB_PORT", 1433))
-        odbc_driver = os.environ.get("ODBC_DRIVER", "ODBC Driver 17 for SQL Server").replace(" ", "+")
-        url = (
-            f"mssql+pyodbc://{quote_plus(user)}:{quote_plus(password)}"
-            f"@{host}:{port}/{schema}"
-            f"?driver={odbc_driver}&TrustServerCertificate=yes"
+        odbc_driver = os.environ.get("ODBC_DRIVER", "ODBC Driver 17 for SQL Server")
+        url = URL.create(
+            "mssql+pyodbc",
+            username=user,
+            password=password,
+            host=host,
+            port=port,
+            database=schema,
+            query={"driver": odbc_driver, "TrustServerCertificate": "yes"},
         )
         return create_engine(url, pool_recycle=3600, pool_pre_ping=True)
     port = int(os.environ.get("SOURCE_DB_PORT", 3306))
-    url = f"mysql+pymysql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{schema}"
+    url = URL.create("mysql+pymysql", username=user, password=password, host=host, port=port, database=schema)
     return create_engine(url, pool_recycle=3600, pool_pre_ping=True)
 
 

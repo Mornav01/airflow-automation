@@ -19,8 +19,9 @@ import pandas as pd
 import boto3
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from urllib.parse import unquote
 from sqlalchemy import create_engine, inspect, text
+
+from db_url import make_conn_url
 
 logging.basicConfig(
     level=logging.INFO,
@@ -115,9 +116,10 @@ def discover_tables_in_schema(
     COUNT(*) queries run in parallel for speed.
     """
     try:
-        # @ in password must be percent-encoded in the SQLAlchemy URL
-        connection_str = (
-            f"mysql+pymysql://{username}:{password.replace('@', '%40')}@{host}:{port}/{schema}"
+        # Raw creds in → make_conn_url percent-encodes every field correctly.
+        connection_str = make_conn_url(
+            "mysql+pymysql", username=username, password=password,
+            host=host, port=port, database=schema,
         )
         engine = create_engine(
             connection_str,
@@ -175,7 +177,7 @@ def _dump_one_table(
         "-h", host,
         "-P", port,
         "-u", username,
-        f"-p{unquote(password)}",   # decode %40 → @ for mysqldump (not a URL context)
+        f"-p{password}",   # raw literal from .env — mysqldump wants the unescaped password
         schema,
         table,
     ]

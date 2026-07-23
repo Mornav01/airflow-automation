@@ -39,6 +39,7 @@ import sys
 from datetime import datetime
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL
 
 # The step modules import ``from config_loader import ...`` and one another by
 # bare name, so ingest/ must be importable as a flat directory.
@@ -59,7 +60,9 @@ def _log(msg: str) -> None:
 
 def _server_engine():
     """Engine bound to the MySQL server (no database) for CREATE/DROP DATABASE."""
-    return create_engine(f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}/")
+    return create_engine(
+        URL.create("mysql+pymysql", username=MYSQL_USER, password=MYSQL_PASSWORD, host=MYSQL_HOST)
+    )
 
 
 def _run_step(num: int, total: int, name: str, fn) -> None:
