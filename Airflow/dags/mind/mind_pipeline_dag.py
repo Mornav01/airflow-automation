@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 import traceback as _traceback
 from datetime import date, datetime, timedelta, timezone
 
@@ -488,7 +489,8 @@ def task_init_deid_state(**context):
 # ── Stage 10: Run deid v2 ────────────────────────────────────────────────────
 def task_run_deid(**context):
     params = context["params"]
-    script = os.path.join(_SCRIPTS_DIR, "manual_deidentification_run_v2.py")
+    # state-gated runner: skips tables already at deidentification_status='success'.
+    script = os.path.join(_SCRIPTS_DIR, "state_deidentification_run.py")
     cmd = [
         DEID_PYTHON, script,
         "--config", params["config_yaml"],
@@ -505,8 +507,10 @@ def task_run_deid(**context):
 def task_check_deid_status(**context):
     params = context["params"]
     script = os.path.join(_SCRIPTS_DIR, "state_deid_status_check_v2.py")
+    # v3 status-check uses mssql+pymssql; run under the Airflow interpreter
+    # (air_env has pymssql), not DEID_PYTHON (new_deid = deid-only).
     cmd = [
-        DEID_PYTHON, script,
+        sys.executable, script,
         "--config-yaml",     params["config_yaml"],
         "--tables-filepath", params["deid_post_process_tables_csv"],
         "--max-workers",     str(params.get("deid_status_max_workers", 8)),
@@ -542,37 +546,36 @@ def task_merge_deid_data(**context):
         )
 
 
-# ── Stage 13: S3 Transfer ────────────────────────────────────────────────────
-def task_s3_transfer(**context):
-    params = context["params"]
-    run_date = date.today().isoformat()
-
-    transfer_schema = params.get("s3_deid_schema", "deidentified_staging")
-    max_workers = params.get("parser_workers", None)
-
-    script = os.path.join(_SCRIPTS_DIR, "s3_transfer.py")
-    try:
-        date_folder = datetime.strptime(run_date, "%Y-%m-%d").strftime("%m%d%Y")
-    except ValueError:
-        raise RuntimeError(f"Invalid run_date format: {run_date}. Expected YYYY-MM-DD")
-    destination_prefix = f"EHR/{date_folder}"
-
-    cmd = [
+# ── Stage 13: S3 Transfer (STAGE 5 — state-gated upload → count → delete) ─────
+def _s3_stage_cmd(mode, params):
+    script = os.path.join(_SCRIPTS_DIR, "state_s3_transfer.py")
+    return [
         DEID_PYTHON, script,
-        "--schema",             transfer_schema,
-        "--run_date",           run_date,
-        "--destination_prefix", destination_prefix,
+        "--mode",            mode,
+        "--schema",          params.get("s3_deid_schema", "deidentified_staging"),
+        "--tables-filepath", params["deid_post_process_tables_csv"],
+        "--run_date",        date.today().isoformat(),
+        "--max-workers",     str(params.get("parser_workers") or 4),
     ]
-    if max_workers:
-        cmd.extend(["--max_workers", str(max_workers)])
-        logger.info("S3 Transfer will use %s workers", max_workers)
 
-    logger.info("Running S3 Transfer: schema=%s, run_date=%s", transfer_schema, run_date)
-    logger.debug("Command: %s", " ".join(cmd))
 
-    result = subprocess.run(cmd, check=False, cwd=os.path.dirname(script), env=_ENV)
+def _run_s3_stage(mode, context):
+    result = subprocess.run(_s3_stage_cmd(mode, context["params"]),
+                            check=False, cwd=_SCRIPTS_DIR, env=_ENV)
     if result.returncode != 0:
-        raise RuntimeError(f"s3_transfer failed (rc={result.returncode})")
+        raise RuntimeError(f"s3 {mode} failed (rc={result.returncode})")
+
+
+def task_s3_upload(**context):
+    _run_s3_stage("upload", context)
+
+
+def task_s3_count(**context):
+    _run_s3_stage("count", context)
+
+
+def task_s3_delete(**context):
+    _run_s3_stage("delete", context)
 
 
 # ── Stage 14: Delete processed diff rows (trigger_rule=ALL_DONE) ─────────────
@@ -623,7 +626,7 @@ with DAG(
         "clinicalbin_deid_config": os.path.join(_CONFIGS_DIR, "mind_config_clinicalbin.yaml"),
         "clinicalbin_tables_csv":  os.environ.get("CLINICALBIN_TABLES_CSV", ""),
         # S3 Transfer
-        "s3_deid_schema": os.environ.get("DEID_STAGING_NAME", "deidentified_staging"),
+        "s3_deid_schema": os.environ.get("DEID_MERGED_NAME", "deidentified_mobiledoc_diff_merged"),
         "parser_workers":  None,
         # Control / parallelism
         "skip_restore":           False,
@@ -712,17 +715,26 @@ with DAG(
         python_callable=task_check_deid_status,
     )
 
-    # merge_deid and s3_transfer run in parallel once both deid branches complete
+    # Post-deid runs sequentially: merge → delete original → STAGE 5 (s3 upload → count → delete)
     merge_deid_data = PythonOperator(
         task_id="merge_deid_data",
         python_callable=task_merge_deid_data,
         trigger_rule=TriggerRule.ALL_DONE,
     )
 
-    s3_transfer = PythonOperator(
-        task_id="s3_transfer",
-        python_callable=task_s3_transfer,
-        trigger_rule=TriggerRule.ALL_DONE,
+    s3_upload = PythonOperator(
+        task_id="s3_upload",
+        python_callable=task_s3_upload,
+    )
+
+    s3_count = PythonOperator(
+        task_id="s3_count",
+        python_callable=task_s3_count,
+    )
+
+    s3_delete = PythonOperator(
+        task_id="s3_delete",
+        python_callable=task_s3_delete,
     )
 
     delete_original_diffmerged = PythonOperator(
@@ -750,9 +762,6 @@ with DAG(
     # validate mapping → init deid state → run deid → status check
     validate_mapping >> init_deid_state >> run_deid >> check_deid_status
 
-    # Both deid branches must fully complete before merge+transfer start (in parallel)
-    [clinicalbin_deid, check_deid_status] >> merge_deid_data
-    [clinicalbin_deid, check_deid_status] >> s3_transfer
-
-    # Cleanup only after merge (s3_transfer runs independently in parallel)
-    merge_deid_data >> delete_original_diffmerged
+    # Both deid branches must fully complete, then strictly sequential:
+    # merge → trim original diff-merged → ship de-identified merged accumulator to S3.
+    [clinicalbin_deid, check_deid_status] >> merge_deid_data >> delete_original_diffmerged >> s3_upload >> s3_count >> s3_delete

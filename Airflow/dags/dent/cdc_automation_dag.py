@@ -70,7 +70,7 @@ DEFAULT_CONFIG = {
     "deid_staging_schema": os.environ.get("DEID_STAGING_NAME", "deidentified_staging"),
     "deid_prod_schema":   os.environ.get("DEID_BASE_NAME", "deidentified"),
     "mysql_user":         os.environ.get("DB_USER", ""),
-    "mysql_pass":         os.environ.get("DB_PASS", ""),  # raw literal — used in mysql CLI -p args
+    "mysql_pass":         urllib.parse.unquote(os.environ.get("DB_PASS", "")),  # raw literal — used in mysql CLI -p args (tolerate a legacy %40-encoded value)
     "mysql_host":         os.environ.get("DB_HOST", "localhost"),
     "mysql_port":         os.environ.get("DB_PORT", "3306"),
 }

@@ -31,7 +31,9 @@ from shared.tasks import (  # noqa: E402
     task_merge_deid_data,
     task_run_deid,
     task_run_diff_merge,
-    task_s3_transfer,
+    task_s3_upload,
+    task_s3_count,
+    task_s3_delete,
     task_validate_diff_merge,
     task_validate_mapping,
 )
@@ -96,8 +98,26 @@ DIFF_MERGE_TABLES_CSV        = os.environ.get("DIFF_MERGE_TABLES_CSV", "")
 _SOURCE_DB_TYPE = os.environ.get("SOURCE_DB_TYPE", "mysql")
 
 
+def _read_tables_csv(path: str) -> set:
+    """Return the set of table names in a one-per-line tables CSV (blank/space-trimmed)."""
+    if not path or not os.path.exists(path):
+        return set()
+    with open(path) as f:
+        return {ln.strip() for ln in f if ln.strip()}
+
+
 def task_decrypt_pnotes(**context):
     params = context["params"]
+    # Scope: only decrypt if progressnotes is among the tables this run processes.
+    # If the diff_merge tables CSV is unreadable/empty, scope is unknown → run as before.
+    decrypt_table = "progressnotes"
+    scoped = _read_tables_csv(params.get("diff_merge_tables_csv", ""))
+    if scoped and decrypt_table not in scoped:
+        logger.info(
+            "decrypt_pnotes: '%s' not in diff_merge_tables_csv — skipping (out of scope)",
+            decrypt_table,
+        )
+        return
     script = os.path.join(_ECW_SCRIPTS_DIR, "decrypt_pnotes.py")
     cmd = [
         DEID_PYTHON, script,
@@ -233,9 +253,19 @@ with DAG(
         python_callable=task_merge_deid_data,
     )
 
-    s3_transfer = PythonOperator(
-        task_id="s3_transfer",
-        python_callable=task_s3_transfer,
+    s3_upload = PythonOperator(
+        task_id="s3_upload",
+        python_callable=task_s3_upload,
+    )
+
+    s3_count = PythonOperator(
+        task_id="s3_count",
+        python_callable=task_s3_count,
+    )
+
+    s3_delete = PythonOperator(
+        task_id="s3_delete",
+        python_callable=task_s3_delete,
     )
 
     delete_original_diffmerged = PythonOperator(
@@ -259,6 +289,7 @@ with DAG(
 
     init_deid_state >> run_deid >> check_deid_status
 
-    # Post-deid: merge and S3 transfer run in parallel, then cleanup
-    check_deid_status >> [merge_deid_data, s3_transfer]
-    merge_deid_data >> delete_original_diffmerged
+    # Post-deid: strictly sequential — merge, then trim the original diff-merged,
+    # then STAGE 5: upload the de-identified merged accumulator to S3, write the
+    # count report (while data still present), then delete it from MySQL.
+    check_deid_status >> merge_deid_data >> delete_original_diffmerged >> s3_upload >> s3_count >> s3_delete

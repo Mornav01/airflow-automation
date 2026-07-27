@@ -18,7 +18,8 @@ import json
 import logging
 import os
 import subprocess
-from datetime import date, datetime
+import sys
+from datetime import date, datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -196,10 +197,10 @@ def task_init_deid_state(**context):
 
 def task_run_deid(**context):
     params = context["params"]
-    # Route through the manual_deidentification_run_v2.py wrapper rather than
-    # calling `deid run` directly, so the deid CLI surface is invoked from a
-    # single place (--rerun is the wrapper's default).
-    script = os.path.join(_SCRIPTS_DIR, "manual_deidentification_run_v2.py")
+    # Route through state_deidentification_run.py: it filters the tables CSV to
+    # only tables whose per-table JSON state is not yet 'success' (skip completed
+    # ones), then invokes `deid run` (--rerun is the default) on that subset.
+    script = os.path.join(_SCRIPTS_DIR, "state_deidentification_run.py")
     cmd = [
         _deid_python(), script,
         "--config", params["config_yaml"],
@@ -215,7 +216,7 @@ def task_check_deid_status(**context):
     params = context["params"]
     script = os.path.join(_SCRIPTS_DIR, "state_deid_status_check_v2.py")
     cmd = [
-        _deid_python(), script,
+        sys.executable, script,
         "--config-yaml",     params["config_yaml"],
         "--tables-filepath", params["deid_post_process_tables_csv"],
         "--max-workers",     str(params.get("deid_status_max_workers", 8)),
@@ -313,6 +314,38 @@ def task_s3_transfer(**context):
     result = subprocess.run(cmd, check=False, cwd=os.path.dirname(script), env=_env())
     if result.returncode != 0:
         raise RuntimeError(f"s3_transfer failed (rc={result.returncode})")
+
+
+# ── STAGE 5: aws_transfer (state-gated upload → count → delete) ─────────────────
+def _s3_stage_cmd(mode: str, params: dict) -> list:
+    """Build the state_s3_transfer.py command for a STAGE-5 mode."""
+    script = os.path.join(_SCRIPTS_DIR, "state_s3_transfer.py")
+    return [
+        _deid_python(), script,
+        "--mode",            mode,
+        "--schema",          params.get("s3_deid_schema", "deidentified_staging"),
+        "--tables-filepath", params["deid_post_process_tables_csv"],
+        "--run_date",        date.today().isoformat(),
+        "--max-workers",     str(params.get("parser_workers") or 4),
+    ]
+
+
+def task_s3_upload(**context):
+    rc, out = _run_streaming(_s3_stage_cmd("upload", context["params"]), cwd=_SCRIPTS_DIR)
+    if rc != 0:
+        raise RuntimeError(f"s3 upload failed (rc={rc}):\n{out[-4000:]}")
+
+
+def task_s3_count(**context):
+    rc, out = _run_streaming(_s3_stage_cmd("count", context["params"]), cwd=_SCRIPTS_DIR)
+    if rc != 0:
+        raise RuntimeError(f"s3 count report failed (rc={rc}):\n{out[-4000:]}")
+
+
+def task_s3_delete(**context):
+    rc, out = _run_streaming(_s3_stage_cmd("delete", context["params"]), cwd=_SCRIPTS_DIR)
+    if rc != 0:
+        raise RuntimeError(f"s3 delete failed (rc={rc}):\n{out[-4000:]}")
 
 
 def task_delete_diffmerged(**context):
@@ -468,28 +501,36 @@ def make_mapping_update(scripts_dir: str):
 
 def make_mapping_update_v5(config_file: str):
     """Return a task_mapping_update callable that runs the v5 mapping script in
-    pipeline mode (config-driven, env connections).
+    config-only mode.
 
-    The v5 script (scripts/incremental_mapping_update_v5.py) replaces the
-    per-EHR mapping_delta.py. It reads its structural config from *config_file*
-    and, given --staging_schema/--mapping_schema, builds the source connection
-    from SOURCE_DB_* (staging/delta) and the dest from DB_* (MySQL mapping),
-    then writes --state_file in the format task_validate_mapping expects.
+    The v5 script (scripts/incremental_mapping_update_v5.py) reads its structural
+    config from *config_file* and builds its connections from MAPPING_SOURCE_*
+    (source, e.g. the full prod DB) and MAPPING_DEST_* (MySQL mapping schema) via
+    db_config.MAPPING_SOURCE_CONN / MAPPING_DEST_CONN — NOT from --staging_schema.
     Run with cwd=scripts/ so the config's relative sql/<ehr>/*.sql paths resolve.
+
+    The script writes its own MappingStateManager state; task_validate_mapping
+    reads the separate _MAPPING_STATE_FILE compat file, so we write that here on
+    success.
     """
-    def task_mapping_update(**context):
-        params = context["params"]
+    def task_mapping_update(**_):
         script = os.path.join(_SCRIPTS_DIR, "incremental_mapping_update_v5.py")
         cmd = [
-            _deid_python(), "-u", script,
-            "--config",         config_file,
-            "--staging_schema", params["staging_schema"],
-            "--mapping_schema", params["mapping_schema"],
-            "--state_file",     _MAPPING_STATE_FILE,
+            sys.executable, "-u", script,
+            "--config", config_file,
         ]
         rc, out = _run_streaming(cmd, cwd=_SCRIPTS_DIR)
         if rc != 0:
             raise RuntimeError(f"mapping_update (v5) failed (rc={rc}):\n{out[-4000:]}")
+
+        # v5 (config-only mode) does not write the compat state file the shared
+        # validator expects; write it here so task_validate_mapping passes.
+        os.makedirs(os.path.dirname(_MAPPING_STATE_FILE), exist_ok=True)
+        with open(_MAPPING_STATE_FILE, "w") as f:
+            json.dump(
+                {"success": True, "completed_at": datetime.now(timezone.utc).isoformat()},
+                f, indent=2,
+            )
 
     return task_mapping_update
 
@@ -500,7 +541,7 @@ def make_pii_data(scripts_dir: str):
         params = context["params"]
         script = os.path.join(scripts_dir, "master_pii_delta.py")
         cmd = [
-            _deid_python(), script,
+            sys.executable, script,
             "--master_schema",  params["master_schema"],
             "--staging_schema", params["staging_schema"],
             "--mapping_schema", params["mapping_schema"],
@@ -519,7 +560,7 @@ def make_master_insurance(scripts_dir: str):
         params = context["params"]
         script = os.path.join(scripts_dir, "master_insurance_delta.py")
         cmd = [
-            _deid_python(), script,
+            sys.executable, script,
             "--master_schema",  params["master_schema"],
             "--staging_schema", params["staging_schema"],
             "--mapping_schema", params["mapping_schema"],

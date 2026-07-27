@@ -261,7 +261,20 @@ def main(
 
     source = load_table(engine, table_name)
     if source is None:
-        raise RuntimeError(f"Failed to load source table '{table_name}'")
+        logger.warning(
+            "NO TABLE FOUND IN THE STAGING SCHEMA (%s) — skipping decrypt for '%s'",
+            staging_schema, table_name,
+        )
+        return
+
+    with engine.connect() as conn:
+        row_count = conn.execute(select(func.count()).select_from(source)).scalar()
+    if not row_count:
+        logger.warning(
+            "NO DATA IN STAGING SCHEMA (%s) for '%s' — skipping decrypt",
+            staging_schema, table_name,
+        )
+        return
 
     dest = create_dest_table(engine, source, new_table_name)
     if dest is None:

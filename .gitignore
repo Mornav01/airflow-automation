@@ -37,3 +37,5 @@ deid_runtime/
 Airflow/simple_auth_manager_passwords.json
 
 dumps/*
+
+old.env

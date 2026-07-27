@@ -32,6 +32,8 @@ config_key: clinicalbin_incremental
 # ── State Storage ────────────────────────────────────────────────────
 state_db_path: ${LOG_DIR}/clinicalbin_state.db
 failed_rows_db_path: ${LOG_DIR}/clinicalbin_failed_rows.db
+state_db_url: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/deid_state"
+failed_rows_db_url: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/deid_failed"
 
 # ── Redis ────────────────────────────────────────────────────────────
 redis_url: redis://${DB_HOST}:6379/0

@@ -24,13 +24,14 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
+from urllib.parse import unquote
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL
 
 
 MYSQL_USER = os.environ.get("DB_USER", "")
-MYSQL_PASS = os.environ.get("DB_PASS", "")
+MYSQL_PASS = unquote(os.environ.get("DB_PASS", ""))  # tolerate a legacy %40-encoded value
 MYSQL_HOST = os.environ.get("DB_HOST", "localhost")
 MYSQL_PORT = int(os.environ.get("DB_PORT", "3306"))
 
@@ -44,6 +45,32 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def _is_missing_table_error(exc) -> bool:
+    """True if a DB error indicates a missing source table (dialect-agnostic)."""
+    msg = str(exc).lower()
+    return (
+        "invalid object name" in msg   # MSSQL 208
+        or "42s02" in msg              # ODBC missing-table SQLSTATE
+        or "doesn't exist" in msg      # MySQL 1146
+        or "1146" in msg
+    )
+
+
+def _write_success_state(state_file: str, skipped: bool = False, reason: str = ""):
+    """Write the success state file the downstream validator expects. On a skip,
+    still report success (so the pipeline proceeds) but flag it."""
+    if not state_file:
+        return
+    os.makedirs(os.path.dirname(state_file), exist_ok=True)
+    payload = {"success": True, "completed_at": datetime.now(timezone.utc).isoformat()}
+    if skipped:
+        payload["skipped"] = True
+        payload["reason"] = reason
+    with open(state_file, "w") as f:
+        json.dump(payload, f, indent=2)
+    logger.info("Wrote state file: %s", state_file)
 
 
 def create_mysql_engine(schema: str):
@@ -137,8 +164,26 @@ def run_master_pii_delta(master_schema: str, staging_schema: str, mapping_schema
             users
         """
         )
-        result = conn.execute(query)
-        users_data = result.fetchall()
+        try:
+            result = conn.execute(query)
+            users_data = result.fetchall()
+        except Exception as e:
+            if _is_missing_table_error(e):
+                logger.warning(
+                    "NO TABLE FOUND IN THE STAGING SCHEMA (%s) — skipping master PII delta: %s",
+                    staging_schema, e,
+                )
+                _write_success_state(state_file, skipped=True, reason=str(e))
+                return
+            raise
+
+    if not users_data:
+        logger.warning(
+            "NO TABLE FOUND IN THE STAGING SCHEMA (%s) — no user records; skipping master PII delta",
+            staging_schema,
+        )
+        _write_success_state(state_file, skipped=True, reason="no source rows")
+        return
 
     logger.info("Loaded %d user records", len(users_data))
 
@@ -173,8 +218,18 @@ def run_master_pii_delta(master_schema: str, staging_schema: str, mapping_schema
             patients
         """
         )
-        result = conn.execute(query)
-        patients_data = result.fetchall()
+        try:
+            result = conn.execute(query)
+            patients_data = result.fetchall()
+        except Exception as e:
+            if _is_missing_table_error(e):
+                logger.warning(
+                    "NO TABLE FOUND IN THE STAGING SCHEMA (%s) — skipping master PII delta: %s",
+                    staging_schema, e,
+                )
+                _write_success_state(state_file, skipped=True, reason=str(e))
+                return
+            raise
 
     logger.info("Loaded %d patient records", len(patients_data))
 
@@ -352,11 +407,7 @@ def run_master_pii_delta(master_schema: str, staging_schema: str, mapping_schema
 
     logger.info("Master PII delta processing complete")
 
-    if state_file:
-        os.makedirs(os.path.dirname(state_file), exist_ok=True)
-        with open(state_file, "w") as f:
-            json.dump({"success": True, "completed_at": datetime.now(timezone.utc).isoformat()}, f, indent=2)
-        logger.info("Wrote state file: %s", state_file)
+    _write_success_state(state_file)
 
 
 def main():

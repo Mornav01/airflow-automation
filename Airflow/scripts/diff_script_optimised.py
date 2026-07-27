@@ -361,7 +361,7 @@ def insert_to_diff(
 
     df = df.copy()
     df["diff_type"]         = diff_type
-    df["nd_extracted_date"] = pd.Timestamp("today")  # naive midnight — avoids pyodbc wchar truncation on DATETIME2
+    df["nd_extracted_date"] = pd.Timestamp.now().floor("s")  # real host-local datetime, second precision (no sub-second → avoids DATETIME2 pyodbc truncation)
 
     log.info("  Inserting %d rows  diff_type='%s'", len(df), diff_type)
     df.to_sql(

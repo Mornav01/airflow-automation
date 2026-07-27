@@ -9,7 +9,7 @@ source_db:
   type: ${SOURCE_DB_TYPE}
   host: ${SOURCE_DB_HOST}
   port: ${SOURCE_DB_PORT}
-  database: ${STAGING_DB_NAME}
+  database: ${MERGED_DB_NAME}
   username: ${SOURCE_DB_USER}
   password: ${SOURCE_DB_PASS}
 
@@ -43,6 +43,10 @@ config_key: incremental
 # ── State Storage ────────────────────────────────────────────────────
 state_db_path: ${LOG_DIR}/state.db
 failed_rows_db_path: ${LOG_DIR}/failed_rows.db
+
+state_db_url: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/deid_state"
+failed_rows_db_url: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/deid_failed"
+
 
 # ── Redis ────────────────────────────────────────────────────────────
 redis_url: redis://localhost:6379/0

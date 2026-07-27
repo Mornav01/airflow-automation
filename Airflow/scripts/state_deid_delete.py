@@ -10,14 +10,14 @@ The pipeline flow is:
                          so the table does not grow unboundedly
 
 Deletion condition:
-    nd_extracted_date <= last_processed_date
+    nd_extracted_date <= last_processed_datetime
     (i.e. every row that was already deidentified and merged into the main schema)
 
 For each table in the CSV:
   1. Only run if is_merged = True AND deidentification_status = 'success'
   2. Skip if is_deleted = True
   3. DELETE FROM original_diff_merged.<table>
-         WHERE nd_extracted_date <= last_processed_date
+         WHERE nd_extracted_date <= last_processed_datetime
   4. On success set is_deleted = True in state
 """
 
@@ -81,11 +81,11 @@ class StateManager:
     def load(self, table):
         path = self._file_path(table)
         if not os.path.exists(path):
-            return {"diff": {}, "merge": {}, "deidentification": {}}
+            return {"deidentification": {}}
         with open(path, "r") as f:
             state = json.load(f)
-        state.setdefault("diff", {})
-        state.setdefault("merge", {})
+        # Own only the deidentification key; preserve everything else already in
+        # the file (e.g. STAGE-1's 'diff_merge').
         state.setdefault("deidentification", {})
         return state
 
@@ -136,15 +136,15 @@ def process_table(table_name, state_manager, engine):
         logging.info("[%s] is_deleted=True → skip", table_name)
         return
 
-    # ── Resolve cutoff date from state ────────────────────────
-    last_processed_date = deid.get("last_processed_date")
-    if not last_processed_date:
-        logging.warning("[%s] last_processed_date missing → skip", table_name)
+    # ── Resolve cutoff datetime from state ────────────────────
+    last_processed_datetime = deid.get("last_processed_datetime")
+    if not last_processed_datetime:
+        logging.warning("[%s] last_processed_datetime missing → skip", table_name)
         return
 
-    # last_processed_date is a date string (YYYY-MM-DD) — delete all original
-    # rows extracted on or before this date from original_diff_merged
-    cutoff = last_processed_date
+    # last_processed_datetime is a full ISO timestamp — delete all original
+    # rows extracted on or before this instant from original_diff_merged
+    cutoff = last_processed_datetime
 
     # ── Run delete ────────────────────────────────────────────
     logging.info(
@@ -186,7 +186,7 @@ def main():
     )
 
     with open(args.tables_filepath, newline="") as f:
-        tables = [row[0].strip() for row in csv.reader(f)]
+        tables = [row[0].strip() for row in csv.reader(f) if row and row[0].strip()]
 
     logging.info("Deleting processed original data from original_diff_merged for %d tables "
                  "with max_workers=%d", len(tables), args.max_workers)

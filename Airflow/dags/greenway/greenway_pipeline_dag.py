@@ -32,7 +32,9 @@ from shared.tasks import (  # noqa: E402
     task_merge_deid_data,
     task_run_deid,
     task_run_diff_merge,
-    task_s3_transfer,
+    task_s3_upload,
+    task_s3_count,
+    task_s3_delete,
     task_validate_diff_merge,
     task_validate_mapping,
 )
@@ -151,7 +153,7 @@ with DAG(
         "clinicalbin_deid_config": os.path.join(_GREENWAY_SCRIPTS_DIR, "greenway_config_clinicalbin.yaml"),
         "clinicalbin_tables_csv":  os.environ.get("CLINICALBIN_TABLES_CSV", ""),
         # S3 Transfer
-        "s3_deid_schema": os.environ.get("DEID_STAGING_NAME", "deidentified_staging"),
+        "s3_deid_schema": os.environ.get("DEID_MERGED_NAME", "deidentified_mobiledoc_diff_merged"),
         "parser_workers":  _CLIENT_CFG.get("parser_workers", None),
         # Control / parallelism — defaults from clients/<practice>.yaml
         "skip_restore":            _CLIENT_CFG.get("skip_restore", False),
@@ -245,9 +247,19 @@ with DAG(
         python_callable=task_merge_deid_data,
     )
 
-    s3_transfer = PythonOperator(
-        task_id="s3_transfer",
-        python_callable=task_s3_transfer,
+    s3_upload = PythonOperator(
+        task_id="s3_upload",
+        python_callable=task_s3_upload,
+    )
+
+    s3_count = PythonOperator(
+        task_id="s3_count",
+        python_callable=task_s3_count,
+    )
+
+    s3_delete = PythonOperator(
+        task_id="s3_delete",
+        python_callable=task_s3_delete,
     )
 
     delete_original_diffmerged = PythonOperator(
@@ -274,9 +286,6 @@ with DAG(
     # validate mapping → init deid state → run deid → status check
     validate_mapping >> init_deid_state >> run_deid >> check_deid_status
 
-    # Both deid branches must fully complete before merge+transfer start (in parallel)
-    [clinicalbin_deid, check_deid_status] >> merge_deid_data
-    [clinicalbin_deid, check_deid_status] >> s3_transfer
-
-    # Cleanup only after merge (s3_transfer runs independently in parallel)
-    merge_deid_data >> delete_original_diffmerged
+    # Both deid branches must fully complete, then strictly sequential:
+    # merge → trim original diff-merged → STAGE 5: s3 upload → count → delete.
+    [clinicalbin_deid, check_deid_status] >> merge_deid_data >> delete_original_diffmerged >> s3_upload >> s3_count >> s3_delete

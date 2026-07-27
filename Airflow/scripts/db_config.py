@@ -11,6 +11,7 @@ import os
 import re
 import logging
 from pathlib import Path
+from urllib.parse import unquote
 
 from dotenv import load_dotenv
 
@@ -62,7 +63,7 @@ _load_env_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".
 _SOURCE_USER  = os.environ.get("SOURCE_DB_USER", "")
 _SOURCE_PW    = os.environ.get("SOURCE_DB_PASS", "")
 _DB_USER      = os.environ.get("DB_USER", "")
-_DB_PASS      = os.environ.get("DB_PASS", "")
+_DB_PASS      = unquote(os.environ.get("DB_PASS", ""))  # tolerate a legacy %40-encoded value
 _DB_HOST      = os.environ.get("DB_HOST", "localhost")
 _SOURCE_HOST  = os.environ.get("SOURCE_DB_HOST") or _DB_HOST
 _SOURCE_PORT  = os.environ.get("SOURCE_DB_PORT", "1433")
