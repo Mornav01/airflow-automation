@@ -156,15 +156,15 @@ with DAG(
         "pk_csv":                PK_CSV,
         "state_dir":             STATE_DIR,
         # Mapping / Master delta schemas
-        "mapping_schema": os.environ.get("MAPPING_DB_NAME", "mapping"),
-        "master_schema":  os.environ.get("MASTER_DB_NAME", "master"),
+        "mapping_schema": os.environ.get("MAPPING_DB_NAME", ""),
+        "master_schema":  os.environ.get("MASTER_DB_NAME", ""),
         "staging_schema": os.environ.get("STAGING_DB_NAME", ""),
         # Deid
         "config_yaml":                  _DEFAULT_CONFIG,
         "deid_tables_csv":              DEID_TABLES_CSV,
         "deid_post_process_tables_csv": DEID_POST_PROCESS_TABLES_CSV,
         # S3 Transfer
-        "s3_deid_schema": os.environ.get("DEID_MERGED_NAME", "deidentified_mobiledoc_diff_merged"),
+        "s3_deid_schema": os.environ.get("DEID_MERGED_NAME", ""),
         "parser_workers":  _CLIENT_CFG.get("parser_workers", None),
         # Control / parallelism — defaults from clients/<practice>.yaml
         "skip_restore":            _CLIENT_CFG.get("skip_restore", False),

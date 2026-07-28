@@ -142,8 +142,8 @@ with DAG(
         "pk_csv":                PK_CSV,
         "state_dir":             STATE_DIR,
         # Mapping / Master delta schemas
-        "mapping_schema": os.environ.get("MAPPING_DB_NAME", "mapping"),
-        "master_schema":  os.environ.get("MASTER_DB_NAME", "master"),
+        "mapping_schema": os.environ.get("MAPPING_DB_NAME", ""),
+        "master_schema":  os.environ.get("MASTER_DB_NAME", ""),
         "staging_schema": os.environ.get("STAGING_DB_NAME", ""),
         # MSSQL deid
         "config_yaml":                  _DEFAULT_CONFIG,
@@ -153,7 +153,7 @@ with DAG(
         "clinicalbin_deid_config": os.path.join(_GREENWAY_SCRIPTS_DIR, "greenway_config_clinicalbin.yaml"),
         "clinicalbin_tables_csv":  os.environ.get("CLINICALBIN_TABLES_CSV", ""),
         # S3 Transfer
-        "s3_deid_schema": os.environ.get("DEID_MERGED_NAME", "deidentified_mobiledoc_diff_merged"),
+        "s3_deid_schema": os.environ.get("DEID_MERGED_NAME", ""),
         "parser_workers":  _CLIENT_CFG.get("parser_workers", None),
         # Control / parallelism — defaults from clients/<practice>.yaml
         "skip_restore":            _CLIENT_CFG.get("skip_restore", False),
