@@ -51,7 +51,7 @@ DB_PASS = unquote(os.environ.get("DB_PASS", ""))
 
 S3_BUCKET             = os.environ.get("S3_BUCKET") or None
 S3_DESTINATION_PREFIX = os.environ.get("S3_DESTINATION_PREFIX", "EHR").strip("/")
-BASE_PATH             = os.environ.get("DATA_TRANSFER_BASE_PATH", "/Volumes/NDAIVol/S3 Transfer")
+BASE_PATH             = os.environ.get("DATA_TRANSFER_BASE_PATH", "")
 
 # Row counts for the report come from the deid BASE schema (the full accumulator),
 # NOT the diff-merged upload schema — the uploaded data is further merged into the
