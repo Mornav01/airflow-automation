@@ -146,6 +146,19 @@ def task_check_continue(**context):
     return True
 
 
+def task_cnotes_gate(**context):
+    """ShortCircuit gate: skip the whole cnotes sub-flow when skip_cnotes=True.
+
+    Runtime flag (shows as a checkbox in the trigger UI). Used with
+    ignore_downstream_trigger_rules=False so a skip doesn't force-skip tasks past
+    a trigger-rule boundary (e.g. init_deid_state in cnotes-first mode)."""
+    if context["params"].get("skip_cnotes", False):
+        logger.info("skip_cnotes=True — skipping cnotes sub-flow")
+        return False
+    logger.info("Running cnotes sub-flow")
+    return True
+
+
 def task_validate_mapping(**_):
     state_files = {
         "mapping_update":   _MAPPING_STATE_FILE,
@@ -359,6 +372,107 @@ def task_delete_diffmerged(**context):
     rc, out = _run_streaming(cmd)
     if rc != 0:
         raise RuntimeError(f"delete_diffmerged failed (rc={rc}):\n{out[-4000:]}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# cnotes sub-flow — self-contained deid lifecycle for clinical notes (greenway/mind)
+#
+# Reuses the SAME state scripts as the main pipeline (init / status / merge / s3),
+# but scoped to the cnotes tables CSV + the clinicalbin config, and pointed at a
+# SEPARATE per-table JSON state subfolder ({STATE_DIR}/cnotes) via a STATE_DIR env
+# override. db_config loads .env with os.environ.setdefault(...) and reads
+# STATE_DIR = os.environ["STATE_DIR"], so a pre-set STATE_DIR wins — every cnotes
+# state file / log / S3 count CSV lands under {STATE_DIR}/cnotes, fully isolated
+# from the main run. No edits to the reused scripts are required.
+# ══════════════════════════════════════════════════════════════════════════════
+_CNOTES_STATE_SUBDIR = "cnotes"
+
+
+def _cnotes_env() -> dict:
+    """Like _env() but with STATE_DIR redirected to the {STATE_DIR}/cnotes subfolder
+    so the reused state scripts write their per-table JSON there instead of the
+    main state dir."""
+    env = _env()
+    env["STATE_DIR"] = os.path.join(os.environ.get("STATE_DIR", ""), _CNOTES_STATE_SUBDIR)
+    return env
+
+
+def task_cnotes_init(**context):
+    params = context["params"]
+    script = os.path.join(_SCRIPTS_DIR, "state_deid_init_v2.py")
+    cmd = [
+        _deid_python(), script,
+        "--tables-filepath", params["clinicalbin_tables_csv"],
+        "--max-workers",     str(params.get("deid_init_max_workers", 16)),
+    ]
+    rc, out = _run_streaming(cmd, env=_cnotes_env())
+    if rc != 0:
+        raise RuntimeError(f"cnotes deid state init failed (rc={rc}):\n{out[-4000:]}")
+
+
+def task_cnotes_status(**context):
+    params = context["params"]
+    script = os.path.join(_SCRIPTS_DIR, "state_deid_status_check_v2.py")
+    cmd = [
+        sys.executable, script,
+        "--config-yaml",     params["clinicalbin_deid_config"],
+        "--tables-filepath", params["clinicalbin_tables_csv"],
+        "--max-workers",     str(params.get("deid_status_max_workers", 8)),
+    ]
+    rc, out = _run_streaming(cmd, env=_cnotes_env())
+    if rc != 0:
+        raise RuntimeError(f"cnotes deid status check failed (rc={rc}):\n{out[-4000:]}")
+
+
+def task_cnotes_merge(**context):
+    params = context["params"]
+    script = os.path.join(_SCRIPTS_DIR, "state_deid_merge.py")
+    cmd = [
+        _deid_python(), script,
+        "--tables_filepath", params["clinicalbin_tables_csv"],
+        "--max_workers",     str(params.get("deid_merge_max_workers", 8)),
+    ]
+    # Cnotes table PKs default to PK_CSV (db_config); pass a cnotes-specific PK CSV
+    # only if one is configured.
+    if params.get("cnotes_pk_csv"):
+        cmd += ["--pk_csv", params["cnotes_pk_csv"]]
+    rc, out = _run_streaming(cmd, env=_cnotes_env())
+    if rc != 0:
+        raise RuntimeError(f"cnotes deid merge failed (rc={rc}):\n{out[-4000:]}")
+
+
+def _cnotes_s3_stage_cmd(mode: str, params: dict) -> list:
+    """state_s3_transfer.py command for a cnotes STAGE-5 mode (scoped to cnotes tables)."""
+    script = os.path.join(_SCRIPTS_DIR, "state_s3_transfer.py")
+    return [
+        _deid_python(), script,
+        "--mode",            mode,
+        "--schema",          params.get("s3_deid_schema", "deidentified_staging"),
+        "--tables-filepath", params["clinicalbin_tables_csv"],
+        "--run_date",        date.today().isoformat(),
+        "--max-workers",     str(params.get("parser_workers") or 4),
+    ]
+
+
+def task_cnotes_s3_upload(**context):
+    rc, out = _run_streaming(_cnotes_s3_stage_cmd("upload", context["params"]),
+                             env=_cnotes_env(), cwd=_SCRIPTS_DIR)
+    if rc != 0:
+        raise RuntimeError(f"cnotes s3 upload failed (rc={rc}):\n{out[-4000:]}")
+
+
+def task_cnotes_s3_count(**context):
+    rc, out = _run_streaming(_cnotes_s3_stage_cmd("count", context["params"]),
+                             env=_cnotes_env(), cwd=_SCRIPTS_DIR)
+    if rc != 0:
+        raise RuntimeError(f"cnotes s3 count report failed (rc={rc}):\n{out[-4000:]}")
+
+
+def task_cnotes_s3_delete(**context):
+    rc, out = _run_streaming(_cnotes_s3_stage_cmd("delete", context["params"]),
+                             env=_cnotes_env(), cwd=_SCRIPTS_DIR)
+    if rc != 0:
+        raise RuntimeError(f"cnotes s3 delete failed (rc={rc}):\n{out[-4000:]}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
