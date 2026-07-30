@@ -371,6 +371,7 @@ class MergeEngine:
         self._log("Step 2: prepare MAIN table")
         self._drop_primary_key(table)
         self._ensure_nd_auto_increment_main(table, pk_cols)
+        self._ensure_nd_auto_increment_unique_index(table)
         self._ensure_nd_extracted_date(table, default_date)
         self._ensure_active_flag(self.main_engine, self.main_db, table)
         if pk_cols:
@@ -646,6 +647,66 @@ class MergeEngine:
                     UPDATE cte SET nd_auto_increment_id = rn
                 """))
         self._log(f"nd_auto_increment_id populated on MAIN.{table}")
+
+    def _ensure_nd_auto_increment_unique_index(self, table: str):
+        """Enforce a UNIQUE index on MAIN.nd_auto_increment_id (defense-in-depth).
+
+        Idempotent: skips if the index already exists. If the base table already
+        holds duplicate ids (from the pre-fix state logic), FAILS LOUDLY with the
+        offending ids so they can be resolved manually — rather than silently
+        letting the merge insert more duplicates. Once the index exists, any stray
+        duplicate insert (e.g. a re-merged diff) raises a clear UNIQUE violation.
+        """
+        idx_name = "ux_nd_auto_increment_id"
+
+        # 1) skip if the unique index already exists
+        with self.main_engine.connect() as conn:
+            if self.db_type == "mysql":
+                exists = conn.execute(text("""
+                    SELECT COUNT(*) FROM information_schema.statistics
+                    WHERE table_schema = :db AND table_name = :tbl AND index_name = :idx
+                """), {"db": self.main_db, "tbl": table, "idx": idx_name}).scalar()
+            else:
+                exists = conn.execute(text("""
+                    SELECT COUNT(*) FROM sys.indexes
+                    WHERE object_id = OBJECT_ID(:tbl) AND name = :idx
+                """), {"tbl": table, "idx": idx_name}).scalar()
+        if exists:
+            self._log(f"unique index {idx_name} already exists on MAIN.{table} — skipping")
+            return
+
+        # 2) detect pre-existing duplicates — fail loudly (do NOT auto-fix)
+        with self.main_engine.connect() as conn:
+            if self.db_type == "mysql":
+                dups = conn.execute(text(
+                    f"SELECT nd_auto_increment_id, COUNT(*) FROM `{self.main_db}`.`{table}` "
+                    f"WHERE nd_auto_increment_id IS NOT NULL "
+                    f"GROUP BY nd_auto_increment_id HAVING COUNT(*) > 1"
+                )).fetchall()
+            else:
+                dups = conn.execute(text(
+                    f"SELECT nd_auto_increment_id, COUNT(*) FROM {table} "
+                    f"WHERE nd_auto_increment_id IS NOT NULL "
+                    f"GROUP BY nd_auto_increment_id HAVING COUNT(*) > 1"
+                )).fetchall()
+        if dups:
+            sample = ", ".join(str(r[0]) for r in dups[:20])
+            raise Exception(
+                f"Cannot add UNIQUE index on nd_auto_increment_id for MAIN.{table} — "
+                f"{len(dups)} duplicate id(s) present (first 20: {sample}). "
+                f"Resolve the duplicates in the base table and re-run."
+            )
+
+        # 3) create the UNIQUE index
+        with self.main_engine.begin() as conn:
+            if self.db_type == "mysql":
+                conn.execute(text(
+                    f"ALTER TABLE `{self.main_db}`.`{table}` "
+                    f"ADD UNIQUE INDEX {idx_name} (nd_auto_increment_id)"
+                ))
+            else:
+                conn.execute(text(f"CREATE UNIQUE INDEX {idx_name} ON {table} (nd_auto_increment_id)"))
+        self._log(f"Created UNIQUE index {idx_name} on MAIN.{table}(nd_auto_increment_id)")
 
     def _ensure_nd_extracted_date(self, table: str, default_date: str):
         if self._column_exists(self.main_engine, self.main_db, table, "nd_extracted_date"):
