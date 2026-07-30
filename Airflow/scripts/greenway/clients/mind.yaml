@@ -6,6 +6,13 @@ skip_dump: false
 skip_restore: false
 stop_after_diff_merge: false
 
+# cnotes sub-flow:
+#   skip_cnotes  — runtime UI checkbox default (cnotes_gate skips the chain when true)
+#   cnotes_first — parse-time ordering: true runs cnotes BEFORE the main deid (default: after)
+skip_cnotes: false
+cnotes_first: false
+
+
 diff_merge_max_workers: 16
 deid_init_max_workers: 16
 deid_status_max_workers: 8
