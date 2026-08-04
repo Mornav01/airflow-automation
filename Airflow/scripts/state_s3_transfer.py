@@ -8,18 +8,33 @@ and tracked per table under the `aws_transfer` key of {STATE_DIR}/{table}.json:
   --mode upload : mysqldump + upload each scoped table to S3 (skip if already
                   done today, or if a prior upload is pending delete → let
                   delete run first). After every scoped .sql file has landed,
-                  writes and uploads sql_dump_stats.csv to
-                  {S3_DESTINATION_PREFIX}/merge_stats/{MMDDYYYY}/ — its presence
-                  there signals the restore pipeline that the transfer is complete.
+                  writes and uploads sql_dump_stats.csv — its presence signals
+                  the restore pipeline that the transfer is complete.
   --mode count  : refresh a cumulative count CSV — query ONLY the scoped tables,
                   carry over all other rows from the previous CSV (no DB query),
                   scoped wins on clash — then upload the CSV to S3.
   --mode delete : DROP each scoped table from the MySQL schema once its upload
                   succeeded (idempotent / resumable).
 
+S3 layout — both prefixes come straight from .env, dated by --run_date:
+
+  {S3_INCREMENTAL_DUMP_PATH_PREFIX}/{MMDDYYYY}/{schema}/{table}.sql
+  {S3_INCREMENTAL_DUMP_PATH_PREFIX}/{MMDDYYYY}/sql_dump_stats.csv
+  {S3_COUNT_REPORT_PATH_PREFIX}/{MMDDYYYY}/count_report.csv
+
+i.e. with S3_INCREMENTAL_DUMP_PATH_PREFIX=EHR/nd_incremental and
+     S3_COUNT_REPORT_PATH_PREFIX=EHR/merge_stats:
+
+  EHR/nd_incremental/08042026/deidentified_staging/enc.sql
+  EHR/nd_incremental/08042026/sql_dump_stats.csv
+  EHR/merge_stats/08042026/count_report.csv
+
+Every date in this script derives from --run_date. The host clock is read in
+exactly one place: the --run_date default, for manual invocations.
+
 Per-table `aws_transfer` state:
   transfer_status      : "started" | "success"   (upload result)
-  last_processed_date  : "YYYY-MM-DD"            (date of last successful upload — daily gate)
+  last_processed_date  : "YYYY-MM-DD"            (run_date of last successful upload — daily gate)
   is_deleted           : bool                    (MySQL-side DROP done)
   upload_Message / delete_Message : str | None
 """
@@ -54,7 +69,16 @@ DB_USER = os.environ.get("DB_USER", "")
 DB_PASS = unquote(os.environ.get("DB_PASS", ""))
 
 S3_BUCKET = os.environ.get("S3_BUCKET") or None
-S3_DESTINATION_PREFIX = os.environ.get("S3_DESTINATION_PREFIX", "EHR").strip("/")
+
+# Full S3 key prefixes, maintained centrally in .env (each already includes the
+# top-level EHR folder). A dated MMDDYYYY folder is appended per run.
+#   S3_INCREMENTAL_DUMP_PATH_PREFIX → the .sql payload + sql_dump_stats.csv
+#   S3_COUNT_REPORT_PATH_PREFIX     → count_report.csv
+S3_INCREMENTAL_PREFIX = os.environ.get(
+    "S3_INCREMENTAL_DUMP_PATH_PREFIX", "EHR/nd_incremental").strip("/")
+S3_COUNT_PREFIX = os.environ.get(
+    "S3_COUNT_REPORT_PATH_PREFIX", "EHR/merge_stats").strip("/")
+
 BASE_PATH = os.environ.get("DATA_TRANSFER_BASE_PATH", "")
 
 # Row counts for the report come from the deid BASE schema (the full accumulator),
@@ -62,21 +86,18 @@ BASE_PATH = os.environ.get("DATA_TRANSFER_BASE_PATH", "")
 # base on the AWS side, so row comparison (local vs AWS) is against the base on both.
 COUNT_SCHEMA = os.environ.get("DEID_BASE_NAME")
 
-# Cumulative count CSV persisted across runs.
+# Cumulative count CSV persisted across runs. Uploaded to
+#     {S3_COUNT_REPORT_PATH_PREFIX}/{MMDDYYYY of run_date}/count_report.csv
 COUNT_DIR = os.path.join(STATE_DIR, "aws_transfer")
 COUNT_CSV = os.path.join(COUNT_DIR, "count_report.csv")
 COUNT_FIELDS = ["table_name", "row_count_total", "row_count_active", "snapshot_date", "created_at"]
 
 # Manifest of the .sql files uploaded in THIS run (scoped tables only — skipped
 # and no-op tables are omitted). Schema matches s3_transfer.py's stats CSV so the
-# restore side needs no changes.
-#
-# It lives OUTSIDE the data prefix, under its own dated folder:
-#     {S3_DESTINATION_PREFIX}/{STATS_SUBFOLDER}/{MMDDYYYY}/sql_dump_stats.csv
-#     e.g. EHR/merge_stats/07062026/sql_dump_stats.csv
-# so the .sql folder stays free of non-data objects and manifests retain history.
+# restore side needs no changes. Sits in the same dated folder as the payload it
+# describes:
+#     {S3_INCREMENTAL_DUMP_PATH_PREFIX}/{MMDDYYYY of run_date}/sql_dump_stats.csv
 STATS_FILENAME = "sql_dump_stats.csv"
-STATS_SUBFOLDER = os.environ.get("S3_STATS_SUBFOLDER", "merge_stats").strip("/")
 STATS_FIELDS = ["file_path", "checksum", "file_size_bytes"]
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -107,14 +128,14 @@ class StateManager:
 
 
 # ── Gates ───────────────────────────────────────────────────────────────────────
-def should_upload(aws: dict, today: str) -> bool:
+def should_upload(aws: dict, run_date: str) -> bool:
     status = aws.get("transfer_status")
     if status != "success":
         return True                              # never uploaded / retry
     if not aws.get("is_deleted", False):
         return False                             # pending delete → let delete run first
-    if aws.get("last_processed_date") == today:
-        return False                             # already fully done today
+    if aws.get("last_processed_date") == run_date:
+        return False                             # already fully done for this run_date
     return True                                  # deleted on an older day → new cycle
 
 
@@ -124,6 +145,7 @@ def should_delete(aws: dict) -> bool:
 
 # ── Small helpers ────────────────────────────────────────────────────────────────
 def _today() -> str:
+    """Only used as the --run_date fallback for manual invocations."""
     return date.today().isoformat()
 
 
@@ -142,22 +164,23 @@ def _date_folder(run_date: str) -> str:
     return datetime.strptime(run_date, "%Y-%m-%d").strftime("%m%d%Y")
 
 
-def _today_folder() -> str:
-    """MMDDYYYY for the ACTUAL current date — not --run_date."""
-    return date.today().strftime("%m%d%Y")
+def _default_data_prefix(run_date: str) -> str:
+    """EHR/nd_incremental/MMDDYYYY — holds {schema}/{table}.sql."""
+    return f"{S3_INCREMENTAL_PREFIX}/{_date_folder(run_date)}"
 
 
-def _default_stats_prefix() -> str:
-    """
-    EHR/merge_stats/MMDDYYYY — independent of the data prefix, and dated by the
-    real current date rather than --run_date, so the folder records when the
-    transfer actually happened.
-    """
-    return f"{S3_DESTINATION_PREFIX}/{STATS_SUBFOLDER}/{_today_folder()}"
+def _default_stats_prefix(run_date: str) -> str:
+    """Same folder as the .sql payload — holds sql_dump_stats.csv."""
+    return f"{S3_INCREMENTAL_PREFIX}/{_date_folder(run_date)}"
+
+
+def _default_count_prefix(run_date: str) -> str:
+    """EHR/merge_stats/MMDDYYYY — holds count_report.csv."""
+    return f"{S3_COUNT_PREFIX}/{_date_folder(run_date)}"
 
 
 # ── Upload manifest (sql_dump_stats.csv) ────────────────────────────────────────
-def _write_upload_manifest(rows: list[dict], stats_prefix: str, client) -> None:
+def _write_upload_manifest(rows: list[dict], run_date: str, stats_prefix: str, client) -> None:
     """
     Write + upload the stats CSV for the tables uploaded in THIS run.
 
@@ -165,9 +188,10 @@ def _write_upload_manifest(rows: list[dict], stats_prefix: str, client) -> None:
     object's presence under {stats_prefix}/ is a reliable "transfer complete"
     marker for the restore pipeline.
 
-    stats_prefix is the manifest's own folder, dated by the CURRENT date
-    (default {S3_DESTINATION_PREFIX}/merge_stats/{MMDDYYYY}) — not the .sql data
-    prefix, and not --run_date.
+    stats_prefix defaults to {S3_INCREMENTAL_DUMP_PATH_PREFIX}/{MMDDYYYY of
+    run_date} — the same folder as the .sql payload it describes. Every date in
+    this script comes from --run_date; the host clock is never consulted, so a
+    UTC-vs-local skew can't split the marker from the data.
     """
     if not rows:
         logger.info("No tables uploaded this run — skipping %s", STATS_FILENAME)
@@ -175,8 +199,8 @@ def _write_upload_manifest(rows: list[dict], stats_prefix: str, client) -> None:
 
     rows.sort(key=lambda r: r["file_path"])  # deterministic regardless of completion order
 
-    # Local copy mirrors the S3 layout so the two are easy to reconcile by eye.
-    local_dir = os.path.join(BASE_PATH, STATS_SUBFOLDER, _today_folder())
+    # Local copy sits in the run's dated folder, next to count_report.csv.
+    local_dir = os.path.join(BASE_PATH, _date_folder(run_date))
     os.makedirs(local_dir, exist_ok=True)
     local = os.path.join(local_dir, STATS_FILENAME)
 
@@ -193,7 +217,6 @@ def _write_upload_manifest(rows: list[dict], stats_prefix: str, client) -> None:
 # ── Mode: upload ─────────────────────────────────────────────────────────────────
 def run_upload(schema, tables, run_date, destination_prefix, max_workers, stats_prefix=None):
     sm = StateManager(STATE_DIR)
-    today = _today()
     date_folder = _date_folder(run_date)
     schema_dir = os.path.join(BASE_PATH, date_folder, schema)
     os.makedirs(schema_dir, exist_ok=True)
@@ -206,7 +229,7 @@ def run_upload(schema, tables, run_date, destination_prefix, max_workers, stats_
         state = sm.load(table)
         aws = state.get("aws_transfer", {})
 
-        if not should_upload(aws, today):
+        if not should_upload(aws, run_date):
             logger.info("[%s] skip upload (status=%s, is_deleted=%s, date=%s)",
                         table, aws.get("transfer_status"), aws.get("is_deleted"),
                         aws.get("last_processed_date"))
@@ -222,7 +245,7 @@ def run_upload(schema, tables, run_date, destination_prefix, max_workers, stats_
             aws.update({
                 "table": table,
                 "transfer_status": "success",
-                "last_processed_date": today,
+                "last_processed_date": run_date,
                 "is_deleted": False,
                 "upload_Message": "table not present — nothing to upload",
             })
@@ -257,7 +280,7 @@ def run_upload(schema, tables, run_date, destination_prefix, max_workers, stats_
 
             aws.update({
                 "transfer_status": "success",
-                "last_processed_date": today,
+                "last_processed_date": run_date,
                 "is_deleted": False,
                 "upload_Message": f"uploaded → s3://{S3_BUCKET}/{s3_key}",
             })
@@ -287,7 +310,8 @@ def run_upload(schema, tables, run_date, destination_prefix, max_workers, stats_
     if failed:
         raise RuntimeError(f"S3 upload failed for: {failed}")
 
-    _write_upload_manifest(manifest, stats_prefix or _default_stats_prefix(), client)
+    _write_upload_manifest(manifest, run_date,
+                           stats_prefix or _default_stats_prefix(run_date), client)
     logger.info("Upload complete for %d scoped table(s)", len(tables))
 
 
@@ -301,7 +325,8 @@ def _read_prev_counts() -> dict:
 
 def run_count(schema, tables, run_date, destination_prefix):
     os.makedirs(COUNT_DIR, exist_ok=True)
-    today = _today()
+    # snapshot_date is the run's date; created_at stays wall-clock, since it
+    # records when the row was actually written.
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     merged = _read_prev_counts()                 # carry over ALL previous rows (no DB query)
@@ -330,7 +355,7 @@ def run_count(schema, tables, run_date, destination_prefix):
                 "table_name": table,
                 "row_count_total": total,
                 "row_count_active": active,
-                "snapshot_date": today,
+                "snapshot_date": run_date,
                 "created_at": now,
             }
             queried += 1
@@ -405,10 +430,14 @@ def main():
     p.add_argument("--tables-filepath", required=True)
     p.add_argument("--run_date", default=_today(), help="YYYY-MM-DD (default: today)")
     p.add_argument("--destination_prefix", default=None,
-                   help="S3 prefix for the .sql files (default: {S3_DESTINATION_PREFIX}/{MMDDYYYY})")
+                   help="S3 prefix for the .sql files "
+                        "(default: {S3_INCREMENTAL_DUMP_PATH_PREFIX}/{MMDDYYYY of run_date})")
     p.add_argument("--stats_prefix", default=None,
-                   help="S3 prefix for sql_dump_stats.csv (default: "
-                        "{S3_DESTINATION_PREFIX}/merge_stats/{MMDDYYYY of the current date})")
+                   help="S3 prefix for sql_dump_stats.csv "
+                        "(default: {S3_INCREMENTAL_DUMP_PATH_PREFIX}/{MMDDYYYY of run_date})")
+    p.add_argument("--count_prefix", default=None,
+                   help="S3 prefix for count_report.csv "
+                        "(default: {S3_COUNT_REPORT_PATH_PREFIX}/{MMDDYYYY of run_date})")
     p.add_argument("--max-workers", type=int, default=4)
     args = p.parse_args()
 
@@ -417,15 +446,16 @@ def main():
         logger.info("No scoped tables in %s — nothing to do.", args.tables_filepath)
         return
 
-    dest = args.destination_prefix or f"{S3_DESTINATION_PREFIX}/{_date_folder(args.run_date)}"
-
     if args.mode == "upload":
         if not S3_BUCKET:
             raise RuntimeError("S3_BUCKET must be set in .env")
-        run_upload(args.schema, tables, args.run_date, dest, args.max_workers,
+        run_upload(args.schema, tables, args.run_date,
+                   args.destination_prefix or _default_data_prefix(args.run_date),
+                   args.max_workers,
                    stats_prefix=args.stats_prefix)
     elif args.mode == "count":
-        run_count(args.schema, tables, args.run_date, dest)
+        run_count(args.schema, tables, args.run_date,
+                  args.count_prefix or _default_count_prefix(args.run_date))
     elif args.mode == "delete":
         run_delete(args.schema, tables, args.max_workers)
 
