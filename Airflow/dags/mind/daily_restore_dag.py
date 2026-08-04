@@ -41,7 +41,7 @@ from shared.tasks import task_check_db_availability, task_restore  # noqa: E402
 
 local_tz = pendulum.timezone("Asia/Kolkata")
 
-_SCHEDULE = os.environ.get("RESTORE_SCHEDULE", "30 1 * * *")  # default 01:30 Asia/Kolkata (after the dump)
+_SCHEDULE = os.environ.get("RESTORE_SCHEDULE")  # default 01:30 Asia/Kolkata (after the dump)
 _SKIP_RESTORE = os.environ.get("RESTORE_SKIP", "").strip().lower() in ("1", "true", "yes", "on")
 
 

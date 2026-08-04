@@ -35,19 +35,19 @@ import sqlalchemy as sa
 # ============================================================
 # ===================== CONFIG ===============================
 # ============================================================
-
 from db_config import DIFFMERGED_CONN, STATE_DIR
 
 # Original accumulated data DB — rows are deleted here after deidentification + merge
 DEID_DIFF_CONN = DIFFMERGED_CONN
 
-# Column that records when each row was extracted into the diff pipeline
+# Column that records when each row was extracted into the diff pipeline.
+# Type in MSSQL is `datetime` (3-digit fractional seconds, 1/300 s grid).
 EXTRACTED_DATE_COLUMN = "nd_extracted_date"
+
 
 # ============================================================
 # ===================== LOGGING ==============================
 # ============================================================
-
 def setup_logging(state_dir):
     log_dir = os.path.join(state_dir, "deid_delete")
     os.makedirs(log_dir, exist_ok=True)
@@ -68,9 +68,7 @@ def setup_logging(state_dir):
 # ============================================================
 # ===================== STATE MANAGER ========================
 # ============================================================
-
 class StateManager:
-
     def __init__(self, state_dir):
         self.state_dir = state_dir
         os.makedirs(self.state_dir, exist_ok=True)
@@ -96,15 +94,41 @@ class StateManager:
 
 
 # ============================================================
+# ===================== CUTOFF PARSING =======================
+# ============================================================
+def _parse_cutoff(value):
+    """
+    Turn the state's last_processed_datetime into a real `datetime`.
+
+    Why this exists — the JSON state holds an ISO *string*
+    ('2026-07-28T07:39:27.023778'). Binding that directly made pyodbc send a
+    VARCHAR, forcing SQL Server to string-parse it against a `datetime` column,
+    which fails with 241 / 22007 on 6-digit fractional seconds. Binding a real
+    datetime sends SQL_TIMESTAMP and skips string parsing entirely.
+
+    Why the microseconds are dropped — `datetime` keeps fractional seconds on a
+    1/300 s grid and rounds a supplied value to the NEAREST tick, which can round
+    *upward* and delete rows extracted just after the cutoff, i.e. rows that were
+    never deidentified. Flooring to the whole second is strictly conservative:
+    worst case a handful of rows survive until the next cycle. (Sub-millisecond
+    precision also trips 22008 'fractional second precision exceeds the scale'.)
+    """
+    dt = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+    return dt.replace(microsecond=0)
+
+
+# ============================================================
 # ===================== DELETE STEP ==========================
 # ============================================================
-
 def delete_old_diff_rows(table_name, cutoff_date, engine):
     sql = sa.text(
         f"DELETE FROM [{table_name}] "
         f"WHERE [{EXTRACTED_DATE_COLUMN}] <= :cutoff"
+    ).bindparams(
+        # Pin the bind type so a stray string can never silently regress to a
+        # server-side string conversion again.
+        sa.bindparam("cutoff", type_=sa.DateTime())
     )
-
     with engine.begin() as conn:
         result = conn.execute(sql, {"cutoff": cutoff_date})
         return result.rowcount
@@ -113,7 +137,6 @@ def delete_old_diff_rows(table_name, cutoff_date, engine):
 # ============================================================
 # ===================== CORE LOGIC ===========================
 # ============================================================
-
 def process_table(table_name, state_manager, engine):
     state = state_manager.load(table_name)
     deid  = state.get("deidentification", {})
@@ -142,33 +165,43 @@ def process_table(table_name, state_manager, engine):
         logging.warning("[%s] last_processed_datetime missing → skip", table_name)
         return
 
-    # last_processed_datetime is a full ISO timestamp — delete all original
-    # rows extracted on or before this instant from original_diff_merged
-    cutoff = last_processed_datetime
+    try:
+        cutoff = _parse_cutoff(last_processed_datetime)
+    except (TypeError, ValueError) as e:
+        logging.error("[%s] unparseable last_processed_datetime %r: %s",
+                      table_name, last_processed_datetime, e)
+        deid["delete_error"] = f"unparseable last_processed_datetime: {e}"
+        state["deidentification"] = deid
+        state_manager.save(table_name, state)
+        raise
 
     # ── Run delete ────────────────────────────────────────────
     logging.info(
-        "[%s] deleting rows where %s <= %s",
-        table_name, EXTRACTED_DATE_COLUMN, cutoff,
+        "[%s] deleting rows where %s <= %s (from state %s)",
+        table_name, EXTRACTED_DATE_COLUMN, cutoff, last_processed_datetime,
     )
-
     try:
         rows_deleted = delete_old_diff_rows(table_name, cutoff, engine)
         logging.info("[%s] deleted %d rows → is_deleted=True", table_name, rows_deleted)
-        deid["is_deleted"]    = True
-        deid["rows_deleted"]  = rows_deleted
+        deid["is_deleted"]   = True
+        deid["rows_deleted"] = rows_deleted
+        deid.pop("delete_error", None)          # clear a stale error from a prior run
+        state["deidentification"] = deid
+        state_manager.save(table_name, state)
     except Exception as e:
         logging.exception("[%s] delete failed", table_name)
         deid["delete_error"] = str(e)
-
-    state["deidentification"] = deid
-    state_manager.save(table_name, state)
+        state["deidentification"] = deid
+        state_manager.save(table_name, state)
+        # Re-raise so main() records the table and the DAG task actually fails.
+        # Swallowing this previously let the task report success while nothing
+        # was deleted and original_diff_merged kept growing.
+        raise
 
 
 # ============================================================
 # =========================== MAIN ===========================
 # ============================================================
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--tables_filepath", required=True)
@@ -192,7 +225,6 @@ def main():
                  "with max_workers=%d", len(tables), args.max_workers)
 
     state_manager = StateManager(STATE_DIR)
-
     failed_tables = []
 
     try:
@@ -218,3 +250,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
