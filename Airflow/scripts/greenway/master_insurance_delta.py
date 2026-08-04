@@ -11,7 +11,9 @@ with patientid retained. This script resolves each source patient_id → nd_pati
 via patient_mapping_table in --mapping_schema, then refreshes each staged patient:
 DELETE their existing rows, then INSERT the fresh set (one transaction).
 
-Staging is MSSQL (Greenway/PrimeSUITE); master and mapping (dest) schemas are MySQL.
+The staging source dialect is controlled by SOURCE_DB_TYPE ("mssql" default — Greenway/
+PrimeSUITE staging is normally MSSQL — or "mysql"); master and mapping (dest) schemas
+are always MySQL.
 
 Usage:
     python master_insurance_delta.py --master_schema "master_pg" \
@@ -34,10 +36,10 @@ MYSQL_PASS = unquote(os.environ.get("DB_PASS", ""))  # tolerate a legacy %40-enc
 MYSQL_HOST = os.environ.get("DB_HOST", "localhost")
 MYSQL_PORT = int(os.environ.get("DB_PORT", "3306"))
 
-MSSQL_USER = os.environ.get("SOURCE_DB_USER", "sa")
-MSSQL_PASS = os.environ.get("SOURCE_DB_PASS", "")
-MSSQL_HOST = os.environ.get("SOURCE_DB_HOST") or os.environ.get("DB_HOST", "localhost")
-MSSQL_PORT = int(os.environ.get("SOURCE_DB_PORT", "1433"))
+# Controls the dialect used for the Greenway/PrimeSUITE staging source database.
+# "mssql" (default — Greenway/PrimeSUITE staging is normally MSSQL) or "mysql".
+# Dest engines (master/mapping) are always MySQL.
+SOURCE_DB_TYPE = os.environ.get("SOURCE_DB_TYPE", "mssql")
 
 
 logging.basicConfig(
@@ -86,18 +88,27 @@ def create_mysql_engine(schema: str):
     return create_engine(url, pool_recycle=3600, pool_pre_ping=True)
 
 
-def create_mssql_engine(schema: str):
-    """MSSQL engine for the Greenway/PrimeSUITE staging source."""
-    odbc_driver = os.environ.get("ODBC_DRIVER", "ODBC Driver 17 for SQL Server")
-    url = URL.create(
-        "mssql+pyodbc",
-        username=MSSQL_USER,
-        password=MSSQL_PASS,
-        host=MSSQL_HOST,
-        port=MSSQL_PORT,
-        database=schema,
-        query={"driver": odbc_driver, "TrustServerCertificate": "yes"},
-    )
+def build_source_engine(schema: str):
+    """Engine for the Greenway/PrimeSUITE staging source — dialect controlled by
+    SOURCE_DB_TYPE (defaults to "mssql")."""
+    user = os.environ.get("SOURCE_DB_USER", "sa" if SOURCE_DB_TYPE == "mssql" else "")
+    password = os.environ.get("SOURCE_DB_PASS", "")
+    host = os.environ.get("SOURCE_DB_HOST") or os.environ.get("DB_HOST", "localhost")
+    if SOURCE_DB_TYPE == "mssql":
+        port = int(os.environ.get("SOURCE_DB_PORT", 1433))
+        odbc_driver = os.environ.get("ODBC_DRIVER", "ODBC Driver 17 for SQL Server")
+        url = URL.create(
+            "mssql+pyodbc",
+            username=user,
+            password=password,
+            host=host,
+            port=port,
+            database=schema,
+            query={"driver": odbc_driver, "TrustServerCertificate": "yes"},
+        )
+        return create_engine(url, pool_recycle=3600, pool_pre_ping=True)
+    port = int(os.environ.get("SOURCE_DB_PORT", 3306))
+    url = URL.create("mysql+pymysql", username=user, password=password, host=host, port=port, database=schema)
     return create_engine(url, pool_recycle=3600, pool_pre_ping=True)
 
 
@@ -147,7 +158,7 @@ def run_master_insurance_delta(master_schema: str, staging_schema: str, mapping_
         mapping_schema,
     )
 
-    source_engine = create_mssql_engine(staging_schema)
+    source_engine = build_source_engine(staging_schema)
     dest_engine = create_mysql_engine(master_schema)
 
     # -------------------------------------------------------------------------
