@@ -20,6 +20,7 @@ import argparse
 import logging
 import os
 import sys
+from urllib.parse import unquote
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
 
@@ -49,7 +50,7 @@ def mysql_conn_kwargs(mapping_db: str) -> dict:
         "port": int(os.environ.get("DB_PORT", "3306")),
         "database": mapping_db,
         "user": os.environ.get("DB_USER", ""),
-        "password": os.environ.get("DB_PASS", ""),
+        "password": unquote(os.environ.get("DB_PASS", "")),
     }
 
 
@@ -91,15 +92,40 @@ def ensure_personid_column(cursor) -> None:
 
 
 def backfill_personid(cursor, conn, pairs: list) -> None:
+    """Bulk-backfill personid via a single JOIN UPDATE against a temp table.
+
+    The previous approach ran one `UPDATE ... WHERE patientid = %s` per row via
+    executemany() — mysql.connector only batches executemany() into fewer round
+    trips for INSERT/REPLACE, so an UPDATE loop costs one network round trip per
+    patient. Loading pairs into a temp table (batched INSERT) and updating via a
+    single JOIN turns N round trips into ~2, regardless of N.
+    """
     logger.info("Backfilling personid for %d patients into %s", len(pairs), TABLE)
+
+    cursor.execute("DROP TEMPORARY TABLE IF EXISTS tmp_personid_backfill")
+    cursor.execute(
+        "CREATE TEMPORARY TABLE tmp_personid_backfill ("
+        "patientid BIGINT NOT NULL PRIMARY KEY, personid BIGINT NOT NULL)"
+    )
+
     for i in range(0, len(pairs), BATCH_SIZE):
         batch = pairs[i : i + BATCH_SIZE]
         cursor.executemany(
-            f"UPDATE {TABLE} SET personid = %s WHERE patientid = %s",
-            [(personid, patientid) for patientid, personid in batch],
+            "INSERT INTO tmp_personid_backfill (patientid, personid) VALUES (%s, %s)",
+            batch,
         )
-        conn.commit()
-        logger.info("Backfilled %d/%d patients...", min(i + BATCH_SIZE, len(pairs)), len(pairs))
+    conn.commit()
+    logger.info("Loaded %d pairs into temp table", len(pairs))
+
+    cursor.execute(
+        f"UPDATE {TABLE} t "
+        "JOIN tmp_personid_backfill s ON t.patientid = s.patientid "
+        "SET t.personid = s.personid"
+    )
+    conn.commit()
+    logger.info("Backfilled personid via single JOIN UPDATE (%d rows matched)", cursor.rowcount)
+
+    cursor.execute("DROP TEMPORARY TABLE IF EXISTS tmp_personid_backfill")
 
 
 def enforce_not_null(cursor) -> bool:
