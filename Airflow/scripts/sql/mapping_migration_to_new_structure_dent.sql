@@ -51,16 +51,23 @@ USE mapping_pg;
 -- SECTION 2: Create patient_mapping_table
 -- =============================================================================
 
+-- excluded / excluded_at: patients matching the exclusion criteria are kept here
+-- (flagged) rather than dropped, so their nd_patient_id stays stable and the
+-- exclusion is auditable. Every consumer filters excluded = 0.
+-- See CDC/MySQL/mapping_delta.py and add_patient_exclusion_flag_dent.sql.
 CREATE TABLE IF NOT EXISTS patient_mapping_table (
-  nd_patient_id     BIGINT    NOT NULL,
-  patientid         BIGINT    NOT NULL,
-  `offset`          INT       NOT NULL,
-  registration_date DATETIME  DEFAULT NULL,
-  created_at        DATETIME  NOT NULL,
-  updated_at        DATETIME  NOT NULL,
+  nd_patient_id     BIGINT     NOT NULL,
+  patientid         BIGINT     NOT NULL,
+  `offset`          INT        NOT NULL,
+  registration_date DATETIME   DEFAULT NULL,
+  excluded          TINYINT(1) NOT NULL DEFAULT 0,
+  excluded_at       DATETIME   DEFAULT NULL,
+  created_at        DATETIME   NOT NULL,
+  updated_at        DATETIME   NOT NULL,
   PRIMARY KEY (nd_patient_id),
   UNIQUE KEY uq_patientid (patientid),
-  INDEX idx_patientid (patientid)
+  INDEX idx_patientid (patientid),
+  INDEX idx_excluded (excluded)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- =============================================================================
