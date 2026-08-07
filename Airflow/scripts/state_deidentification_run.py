@@ -31,7 +31,7 @@ from dotenv import load_dotenv
 # ── Load .env ─────────────────────────────────────────────────────────────────
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _ENV_FILE   = os.path.join(_SCRIPT_DIR, "..", ".env")
-load_dotenv(dotenv_path=os.path.abspath(_ENV_FILE), override=True)
+load_dotenv(dotenv_path=os.path.abspath(_ENV_FILE))
 
 DEID_PYTHON   = os.environ["DEID_PYTHON"]
 # Which checkout's `deid` code to run (prepended to PYTHONPATH below).
@@ -138,30 +138,51 @@ def main():
     if not args.no_rerun:
         cmd.append("--rerun")
 
-    # ── Pin the `deid` import to DEID_REPO_DIR so the right checkout runs ──────
-    env = os.environ.copy()
-    if DEID_REPO_DIR:
-        repo = os.path.abspath(DEID_REPO_DIR)
-        if not os.path.isdir(os.path.join(repo, "deid")):
-            logging.error("DEID_REPO_DIR (%s) has no 'deid/' package — check the path "
-                          "(it must point at the deidentification_v2 dir).", repo)
-            sys.exit(1)
-        existing = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = repo + (os.pathsep + existing if existing else "")
-        logging.info("Pinning deid import path (DEID_REPO_DIR): %s", repo)
-        # Log which deid module actually resolves, so a wrong checkout is obvious.
-        probe = subprocess.run(
-            [DEID_PYTHON, "-c", "import deid, sys; sys.stdout.write(deid.__file__)"],
-            env=env, capture_output=True, text=True,
+    # ── Verify DEID_PYTHON's own `deid` install matches DEID_REPO_DIR ───────────
+    # DEID_REPO_DIR (config) and whatever's actually pip-installed — typically via
+    # `pip install -e` — in DEID_PYTHON's env are two independent sources of truth;
+    # they must already agree. We do NOT override PYTHONPATH to force agreement:
+    # a silently wrong checkout means deidentification runs against PHI with code
+    # nobody chose, so ANY disagreement fails here rather than being papered over
+    # by an import-order trick. Fix a mismatch by re-running
+    # `pip install -e <DEID_REPO_DIR>` in DEID_PYTHON's env, or by correcting
+    # DEID_REPO_DIR — not by making this script force one to win over the other.
+    if not DEID_REPO_DIR:
+        logging.error(
+            "DEID_REPO_DIR not set — refusing to run: cannot verify DEID_PYTHON's "
+            "'deid' install matches the intended checkout."
         )
-        loaded = probe.stdout.strip()
-        logging.info("deid resolved to: %s", loaded or probe.stderr.strip())
-        if loaded and repo not in loaded:
-            logging.warning("deid did NOT load from DEID_REPO_DIR — got %s. "
-                            "A conflicting install is shadowing it.", loaded)
-    else:
-        logging.warning("DEID_REPO_DIR not set — 'deid' resolves to the installed package, "
-                        "which may be a different checkout.")
+        sys.exit(1)
+
+    repo = os.path.abspath(DEID_REPO_DIR)
+    if not os.path.isdir(os.path.join(repo, "deid")):
+        logging.error("DEID_REPO_DIR (%s) has no 'deid/' package — check the path "
+                      "(it must point at the deidentification_v2 dir).", repo)
+        sys.exit(1)
+
+    env = os.environ.copy()
+    probe = subprocess.run(
+        [DEID_PYTHON, "-c", "import deid, sys; sys.stdout.write(deid.__file__)"],
+        env=env, capture_output=True, text=True,
+    )
+    loaded = probe.stdout.strip()
+    if probe.returncode != 0 or not loaded:
+        logging.error(
+            "Could not import 'deid' under DEID_PYTHON (rc=%d): %s",
+            probe.returncode, probe.stderr.strip() or "(no output)",
+        )
+        sys.exit(1)
+
+    real_repo   = os.path.realpath(repo)
+    real_loaded = os.path.realpath(loaded)
+    if not real_loaded.startswith(real_repo + os.sep):
+        logging.error(
+            "DEID_PYTHON's installed 'deid' (%s) does not match DEID_REPO_DIR (%s) — "
+            "re-run `pip install -e %s` in DEID_PYTHON's env, or correct DEID_REPO_DIR.",
+            loaded, real_repo, real_repo,
+        )
+        sys.exit(1)
+    logging.info("deid resolved to: %s (matches DEID_REPO_DIR)", loaded)
 
     logging.info("Running: %s", " ".join(cmd))
 

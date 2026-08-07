@@ -35,6 +35,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 import sys
 from datetime import datetime
 from functools import lru_cache
@@ -61,6 +62,96 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 
 from db_config import STATE_DIR  # noqa: E402  # type: ignore[import-untyped]
+
+# ── Verify deid consistency before importing from it ────────────────────────
+# get_failed_count() needs the engine's OWN failed_rows table-naming logic
+# (deid/models/failed_rows.py) rather than reconstructing "failed_rows_{db}" by
+# hand: the engine's _sanitize_table_name lowercases and maps non-alphanumerics
+# to '_', so any source DB name with uppercase or a '-'/'.' (Greenway/MIND MSSQL
+# names) built a different table name here than the one the engine actually
+# wrote to — a permanent mismatch that get_failed_count's broad except silently
+# turned into 0, which then made the strict source==dest+failed check fail
+# forever (no terminal 'failed' state, so it just retries indefinitely while the
+# Airflow task stays green).
+#
+# Two separate things need to hold, both fail-hard (not a warning) on mismatch —
+# a silently wrong checkout means this check's failed-row counts are computed
+# against code nobody chose, with no error:
+#
+#   1. DEID_PYTHON's own `deid` install must already match DEID_REPO_DIR. The
+#      failed_rows data was WRITTEN by a `deid run` under DEID_PYTHON — if that
+#      env's pip-installed deid (typically `pip install -e`) disagrees with
+#      DEID_REPO_DIR, whatever we read the naming logic from here won't
+#      necessarily be the code that wrote the data, even before this script's own
+#      import happens. We check this from here (no DEID_PYTHON subprocess exists
+#      elsewhere in this script) by probing DEID_PYTHON directly, with no
+#      PYTHONPATH override — the two must already agree on their own.
+#   2. This script's OWN `deid` import — under sys.executable (the Airflow env),
+#      not DEID_PYTHON — must resolve from DEID_REPO_DIR too. Unlike DEID_PYTHON,
+#      sys.executable has no natural deid install at all (deid is never
+#      pip-installed into the Airflow env); DEID_REPO_DIR is the ONLY way it
+#      becomes importable here, via an explicit sys.path insert, verified after
+#      the fact.
+_DEID_PYTHON   = os.environ.get("DEID_PYTHON")
+_DEID_REPO_DIR = os.environ.get("DEID_REPO_DIR")
+
+if not _DEID_REPO_DIR:
+    logging.error(
+        "DEID_REPO_DIR not set — refusing to run: cannot verify DEID_PYTHON's "
+        "'deid' install matches the intended checkout."
+    )
+    sys.exit(1)
+
+_repo = os.path.abspath(_DEID_REPO_DIR)
+if not os.path.isdir(os.path.join(_repo, "deid")):
+    logging.error("DEID_REPO_DIR (%s) has no 'deid/' package — check the path "
+                  "(it must point at the deidentification_v2 dir).", _repo)
+    sys.exit(1)
+
+# 1. DEID_PYTHON's natural (un-overridden) resolution must already match.
+if not _DEID_PYTHON:
+    logging.error("DEID_PYTHON not set — cannot verify its 'deid' install matches DEID_REPO_DIR.")
+    sys.exit(1)
+
+_probe = subprocess.run(
+    [_DEID_PYTHON, "-c", "import deid, sys; sys.stdout.write(deid.__file__)"],
+    env=os.environ.copy(), capture_output=True, text=True,
+)
+_probe_loaded = _probe.stdout.strip()
+if _probe.returncode != 0 or not _probe_loaded:
+    logging.error(
+        "Could not import 'deid' under DEID_PYTHON (rc=%d): %s",
+        _probe.returncode, _probe.stderr.strip() or "(no output)",
+    )
+    sys.exit(1)
+
+_real_repo        = os.path.realpath(_repo)
+_real_probe_load  = os.path.realpath(_probe_loaded)
+if not _real_probe_load.startswith(_real_repo + os.sep):
+    logging.error(
+        "DEID_PYTHON's installed 'deid' (%s) does not match DEID_REPO_DIR (%s) — "
+        "re-run `pip install -e %s` in DEID_PYTHON's env, or correct DEID_REPO_DIR.",
+        _probe_loaded, _real_repo, _real_repo,
+    )
+    sys.exit(1)
+
+# 2. This script's own import, under sys.executable, must resolve from the same
+#    place — the only way it resolves at all, so verify it actually took.
+if _repo not in sys.path:
+    sys.path.insert(0, _repo)
+
+import deid  # noqa: E402
+
+_real_local_loaded = os.path.realpath(deid.__file__)
+if not _real_local_loaded.startswith(_real_repo + os.sep):
+    logging.error(
+        "deid did NOT load from DEID_REPO_DIR under sys.executable — expected under "
+        "%s, got %s. A conflicting install is shadowing it.", _real_repo, deid.__file__,
+    )
+    sys.exit(1)
+logging.info("deid resolved to: %s (matches DEID_REPO_DIR, and DEID_PYTHON agrees)", deid.__file__)
+
+from deid.models.failed_rows import get_schema_table_name  # noqa: E402
 
 # ============================================================
 # ===================== YAML / CONFIG ========================
@@ -245,17 +336,23 @@ def get_failed_count(
 ) -> int:
     """
     Count rows the deid engine failed to deidentify for this table/config_key,
-    from the failed_rows_{source_db_name} table in the failed-rows DB.
+    from the failed_rows table in the failed-rows DB.
 
     failed_rows_conn_str is a full SQLAlchemy URL (SQLite or MySQL), resolved
     the same way as state_db_url.
 
-    Returns 0 (with a warning) if the failed_rows_{source_db_name} table does
-    not exist — a source DB that never produced failures may have no such table.
+    The table name is resolved via deid's own get_schema_table_name (NOT a local
+    "failed_rows_{source_db_name}" reconstruction) so it always matches what the
+    engine actually wrote — the engine sanitizes source_db_name (lowercases,
+    maps non-alphanumerics to '_') before naming the table, so any DB name with
+    uppercase or a '-'/'.' would otherwise resolve to a table that doesn't exist.
+
+    Returns 0 (with a warning) if that table does not exist — a source DB that
+    never produced failures may have no such table.
     """
     engine = _get_engine(failed_rows_conn_str)
 
-    failed_table = f"failed_rows_{source_db_name}"
+    failed_table = get_schema_table_name(source_db_name)
     quoted       = engine.dialect.identifier_preparer.quote(failed_table)
 
     try:

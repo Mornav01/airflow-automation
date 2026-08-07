@@ -33,7 +33,6 @@ import logging
 import os
 import random
 from collections import defaultdict
-from urllib.parse import unquote
 from datetime import datetime, timezone
 
 from sqlalchemy import (
@@ -56,7 +55,7 @@ from sqlalchemy.sql import bindparam
 
 
 MYSQL_USER = os.environ.get("DB_USER", "")
-MYSQL_PASS = unquote(os.environ.get("DB_PASS", ""))  # tolerate a legacy %40-encoded value
+MYSQL_PASS = os.environ.get("DB_PASS", "")
 MYSQL_HOST = os.environ.get("DB_HOST", "localhost")
 MYSQL_PORT = int(os.environ.get("DB_PORT", "3306"))
 

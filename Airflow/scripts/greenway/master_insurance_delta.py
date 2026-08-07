@@ -25,14 +25,13 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
-from urllib.parse import unquote
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL
 
 
 MYSQL_USER = os.environ.get("DB_USER", "")
-MYSQL_PASS = unquote(os.environ.get("DB_PASS", ""))  # tolerate a legacy %40-encoded value
+MYSQL_PASS = os.environ.get("DB_PASS", "")
 MYSQL_HOST = os.environ.get("DB_HOST", "localhost")
 MYSQL_PORT = int(os.environ.get("DB_PORT", "3306"))
 
@@ -52,11 +51,18 @@ logger = logging.getLogger(__name__)
 def _is_missing_table_error(exc) -> bool:
     """True if a DB error indicates a missing source table (dialect-agnostic)."""
     msg = str(exc).lower()
+    # MySQL 1146 ("table doesn't exist"): check the DBAPI's actual numeric error
+    # code via exc.orig.args[0], not a substring match on the whole message —
+    # "1146" could otherwise appear in an unrelated error (a row id, a byte
+    # count, ...) and get misclassified as a missing table, silently turning a
+    # real failure into a skipped "success".
+    orig_args = getattr(getattr(exc, "orig", None), "args", None)
+    is_1146 = bool(orig_args) and orig_args[0] == 1146
     return (
         "invalid object name" in msg   # MSSQL 208
         or "42s02" in msg              # ODBC missing-table SQLSTATE
-        or "doesn't exist" in msg      # MySQL 1146
-        or "1146" in msg
+        or "doesn't exist" in msg      # MySQL 1146 (message text)
+        or is_1146
     )
 
 

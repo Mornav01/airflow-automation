@@ -76,6 +76,27 @@ def _run_streaming(cmd, *, env: dict | None = None, cwd: str | None = None) -> t
     return rc, "\n".join(lines)
 
 
+def _require_param(params: dict, key: str, task_label: str) -> str:
+    """Fail fast if a required schema/config param is empty or unset.
+
+    Several EHR DAGs source these from os.environ.get(ENV_VAR, "") with no
+    default (deliberately, so a misconfigured env doesn't silently fall back to
+    the wrong schema) — but an unset env var still produces an empty string,
+    which then flows into a subprocess as e.g. --schema "". Downstream that
+    doesn't raise: it just finds no matching table/schema and treats that as a
+    no-op success (state_s3_transfer.py's run_upload), or builds a nonsense
+    query. Catch it here, before the subprocess even starts, so the Airflow
+    task fails clearly instead of reporting green having done nothing.
+    """
+    value = params.get(key)
+    if not value:
+        raise RuntimeError(
+            f"{task_label}: required param '{key}' is empty or unset — check the "
+            f"corresponding env var in .env."
+        )
+    return value
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # State-file paths (constant per machine, derived from STATE_DIR in .env)
 # ──────────────────────────────────────────────────────────────────────────────
@@ -298,7 +319,7 @@ def task_s3_transfer(**context):
     params   = context["params"]
     run_date = date.today().isoformat()
 
-    transfer_schema = params.get("s3_deid_schema", "deidentified_staging")
+    transfer_schema = _require_param(params, "s3_deid_schema", "s3_transfer")
     max_workers     = params.get("parser_workers", None)
 
     script = os.path.join(_SCRIPTS_DIR, "s3_transfer.py")
@@ -336,7 +357,7 @@ def _s3_stage_cmd(mode: str, params: dict) -> list:
     return [
         _deid_python(), script,
         "--mode",            mode,
-        "--schema",          params.get("s3_deid_schema", "deidentified_staging"),
+        "--schema",          _require_param(params, "s3_deid_schema", f"s3_{mode}"),
         "--tables-filepath", params["deid_post_process_tables_csv"],
         "--run_date",        date.today().isoformat(),
         "--max-workers",     str(params.get("parser_workers") or 4),
@@ -447,7 +468,7 @@ def _cnotes_s3_stage_cmd(mode: str, params: dict) -> list:
     return [
         _deid_python(), script,
         "--mode",            mode,
-        "--schema",          params.get("s3_deid_schema", "deidentified_staging"),
+        "--schema",          _require_param(params, "s3_deid_schema", f"cnotes_s3_{mode}"),
         "--tables-filepath", params["clinicalbin_tables_csv"],
         "--run_date",        date.today().isoformat(),
         "--max-workers",     str(params.get("parser_workers") or 4),
@@ -602,8 +623,8 @@ def make_mapping_update(scripts_dir: str):
         script = os.path.join(scripts_dir, "mapping_delta.py")
         cmd = [
             _deid_python(), script,
-            "--mapping_schema", params["mapping_schema"],
-            "--staging_schema", params["staging_schema"],
+            "--mapping_schema", _require_param(params, "mapping_schema", "mapping_update"),
+            "--staging_schema", _require_param(params, "staging_schema", "mapping_update"),
             "--state_file",     _MAPPING_STATE_FILE,
         ]
         rc, out = _run_streaming(cmd)
@@ -656,9 +677,9 @@ def make_pii_data(scripts_dir: str):
         script = os.path.join(scripts_dir, "master_pii_delta.py")
         cmd = [
             sys.executable, script,
-            "--master_schema",  params["master_schema"],
-            "--staging_schema", params["staging_schema"],
-            "--mapping_schema", params["mapping_schema"],
+            "--master_schema",  _require_param(params, "master_schema", "pii_data"),
+            "--staging_schema", _require_param(params, "staging_schema", "pii_data"),
+            "--mapping_schema", _require_param(params, "mapping_schema", "pii_data"),
             "--state_file",     _PII_STATE_FILE,
         ]
         rc, out = _run_streaming(cmd)
@@ -675,9 +696,9 @@ def make_master_insurance(scripts_dir: str):
         script = os.path.join(scripts_dir, "master_insurance_delta.py")
         cmd = [
             sys.executable, script,
-            "--master_schema",  params["master_schema"],
-            "--staging_schema", params["staging_schema"],
-            "--mapping_schema", params["mapping_schema"],
+            "--master_schema",  _require_param(params, "master_schema", "master_insurance"),
+            "--staging_schema", _require_param(params, "staging_schema", "master_insurance"),
+            "--mapping_schema", _require_param(params, "mapping_schema", "master_insurance"),
             "--state_file",     _MASTER_STATE_FILE,
         ]
         rc, out = _run_streaming(cmd)

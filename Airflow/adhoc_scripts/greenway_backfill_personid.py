@@ -20,7 +20,6 @@ import argparse
 import logging
 import os
 import sys
-from urllib.parse import unquote
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
 
@@ -50,7 +49,7 @@ def mysql_conn_kwargs(mapping_db: str) -> dict:
         "port": int(os.environ.get("DB_PORT", "3306")),
         "database": mapping_db,
         "user": os.environ.get("DB_USER", ""),
-        "password": unquote(os.environ.get("DB_PASS", "")),
+        "password": os.environ.get("DB_PASS", ""),
     }
 
 
