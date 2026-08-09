@@ -113,6 +113,9 @@ _MASTER_STATE_FILE       = os.path.join(_MAPPING_MASTER_DIR, "master_insurance_s
 
 def task_run_diff_merge(**context):
     params = context["params"]
+    if params.get("skip_diff_merge", False):
+        logger.info("skip_diff_merge=True — skipping diff+merge")
+        return
     script = os.path.join(_SCRIPTS_DIR, "state_diff_merge_v3.py")
     cmd = [
         _deid_python(), script,
@@ -125,6 +128,38 @@ def task_run_diff_merge(**context):
     rc, out = _run_streaming(cmd)
     if rc != 0:
         raise RuntimeError(f"diff+merge failed (rc={rc}):\n{out[-4000:]}")
+
+
+def _format_diff_merge_summary(summary: dict) -> str:
+    """Grouped, human-readable rendering of state_diff_merge_v3.py's summary JSON
+    for the Airflow task log — one section per outcome, with table names listed
+    so a failure can be acted on without digging through state files."""
+    date_       = summary.get("date", "")
+    total       = summary.get("total_tables", 0)
+    completed   = summary.get("fully_completed_tables", [])
+    diff_failed = summary.get("diff_failed_tables", [])
+    merge_failed = summary.get("merge_failed_tables", [])
+    skipped     = summary.get("skipped_tables", [])
+
+    def _section(label, tag, tables):
+        line = f" [{tag}] {label} ".ljust(58, ".") + f" {len(tables)}"
+        if not tables:
+            return line
+        names = "\n".join(f"     - {t}" for t in tables)
+        return f"{line}\n{names}"
+
+    bar = "=" * 80
+    lines = [
+        bar,
+        f" DIFF+MERGE VALIDATION — {date_}   ({total} tables scoped)",
+        bar,
+        _section("Fully completed today", "OK", completed),
+        _section("Diff failed today", "FAIL", diff_failed),
+        _section("Merge failed today (diff ok, merge failed)", "FAIL", merge_failed),
+        _section("Skipped today (no run yet / stale)", "SKIP", skipped),
+        bar,
+    ]
+    return "\n".join(lines)
 
 
 def task_validate_diff_merge(**context):
@@ -143,19 +178,15 @@ def task_validate_diff_merge(**context):
         )
 
     summary = json.loads(result.stdout.strip())
-    logger.info("Diff+Merge summary:\n%s", json.dumps(summary, indent=4))
+    report = _format_diff_merge_summary(summary)
 
-    diff_failed       = summary.get("diff_failed_today", 0)
-    merge_failed      = summary.get("merge_failed_today", 0)
-    decryption_failed = summary.get("decryption_failed_today", 0)
+    diff_failed  = summary.get("diff_failed_today", 0)
+    merge_failed = summary.get("merge_failed_today", 0)
 
-    if diff_failed > 0 or merge_failed > 0 or decryption_failed > 0:
-        logger.error(
-            f"Diff+Merge pipeline has failures — "
-            f"diff: {diff_failed}, merge: {merge_failed}, decryption: {decryption_failed}"
-        )
+    if diff_failed > 0 or merge_failed > 0:
+        logger.error("\n%s", report)
     else:
-        logger.info("Diff+Merge validation passed.")
+        logger.info("\n%s", report)
 
 
 def task_check_continue(**context):

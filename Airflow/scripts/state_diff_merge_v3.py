@@ -296,13 +296,13 @@ def generate_summary(table_csv, state_dir):
         "total_tables": 0,
         "diff_success_today": 0,
         "diff_failed_today": 0,
+        "diff_failed_tables": [],
         "merge_success_today": 0,
         "merge_failed_today": 0,
+        "merge_failed_tables": [],
         "skipped_today": 0,
-        "decryption_success_today": 0,
-        "decryption_failed_today": 0,
-        "decryption_skipped": 0,
-        "details": []
+        "skipped_tables": [],
+        "fully_completed_tables": [],
     }
 
     with open(table_csv, newline="") as f:
@@ -328,24 +328,16 @@ def generate_summary(table_csv, state_dir):
                 # Merge bucket only meaningful once extraction succeeded
                 if is_merged:
                     summary["merge_success_today"] += 1
+                    summary["fully_completed_tables"].append(table)
                 else:
                     summary["merge_failed_today"] += 1
+                    summary["merge_failed_tables"].append(table)
             else:
                 summary["diff_failed_today"] += 1
+                summary["diff_failed_tables"].append(table)
         else:
             summary["skipped_today"] += 1
-
-        decryption = state.get("diff_decryption")
-        if decryption is not None:
-            dec_date   = decryption.get("last_processed_date")
-            dec_status = decryption.get("status")
-            if dec_date == today:
-                if dec_status == "success":
-                    summary["decryption_success_today"] += 1
-                else:
-                    summary["decryption_failed_today"] += 1
-            else:
-                summary["decryption_skipped"] += 1
+            summary["skipped_tables"].append(table)
 
     return summary
 

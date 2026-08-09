@@ -169,6 +169,7 @@ with DAG(
         "parser_workers":  _CLIENT_CFG.get("parser_workers", None),
         # Control / parallelism — defaults from clients/<practice>.yaml
         "skip_restore":            _CLIENT_CFG.get("skip_restore", False),
+        "skip_diff_merge":         _CLIENT_CFG.get("skip_diff_merge", False),
         "stop_after_diff_merge":   _CLIENT_CFG.get("stop_after_diff_merge", False),
         "skip_s3_upload":          _CLIENT_CFG.get("skip_s3_upload", False),
         "diff_merge_max_workers":  _CLIENT_CFG.get("diff_merge_max_workers", 16),
