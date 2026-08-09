@@ -31,6 +31,7 @@ from shared.tasks import (  # noqa: E402
     task_merge_deid_data,
     task_run_deid,
     task_run_diff_merge,
+    task_s3_gate,
     task_s3_upload,
     task_s3_count,
     task_s3_delete,
@@ -169,6 +170,7 @@ with DAG(
         # Control / parallelism — defaults from clients/<practice>.yaml
         "skip_restore":            _CLIENT_CFG.get("skip_restore", False),
         "stop_after_diff_merge":   _CLIENT_CFG.get("stop_after_diff_merge", False),
+        "skip_s3_upload":          _CLIENT_CFG.get("skip_s3_upload", False),
         "diff_merge_max_workers":  _CLIENT_CFG.get("diff_merge_max_workers", 16),
         "deid_init_max_workers":   _CLIENT_CFG.get("deid_init_max_workers", 16),
         "deid_status_max_workers": _CLIENT_CFG.get("deid_status_max_workers", 8),
@@ -273,6 +275,14 @@ with DAG(
         python_callable=task_delete_diffmerged,
     )
 
+    # UI-toggleable gate (skip_s3_upload) to skip the S3 upload/count/delete
+    # stage entirely; mirrors the cnotes_gate pattern.
+    s3_gate = ShortCircuitOperator(
+        task_id="s3_gate",
+        python_callable=task_s3_gate,
+        ignore_downstream_trigger_rules=False,
+    )
+
     # ── Pipeline ───────────────────────────────────────────────────────────────
     # Verify the DBs are free before restore flips them into RESTORING/standby mode,
     # then apply the logs dumped by the separate daily-dump DAG.
@@ -292,4 +302,6 @@ with DAG(
     # Post-deid: strictly sequential — merge, then trim the original diff-merged,
     # then STAGE 5: upload the de-identified merged accumulator to S3, write the
     # count report (while data still present), then delete it from MySQL.
-    check_deid_status >> merge_deid_data >> delete_original_diffmerged >> s3_upload >> s3_count >> s3_delete
+    # s3_gate (skip_s3_upload UI toggle) can skip the whole upload/count/delete stage.
+    check_deid_status >> merge_deid_data >> delete_original_diffmerged >> s3_gate
+    s3_gate >> s3_upload >> s3_count >> s3_delete

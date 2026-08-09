@@ -39,6 +39,7 @@ from shared.tasks import (  # noqa: E402
     task_merge_deid_data,
     task_run_deid,
     task_run_diff_merge,
+    task_s3_gate,
     task_s3_upload,
     task_s3_count,
     task_s3_delete,
@@ -179,6 +180,7 @@ with DAG(
         # Control / parallelism — defaults from clients/<practice>.yaml
         "skip_restore":            _CLIENT_CFG.get("skip_restore", False),
         "stop_after_diff_merge":   _CLIENT_CFG.get("stop_after_diff_merge", False),
+        "skip_s3_upload":          _CLIENT_CFG.get("skip_s3_upload", False),
         "diff_merge_max_workers":  _CLIENT_CFG.get("diff_merge_max_workers", 16),
         "deid_init_max_workers":   _CLIENT_CFG.get("deid_init_max_workers", 16),
         "deid_status_max_workers": _CLIENT_CFG.get("deid_status_max_workers", 8),
@@ -281,6 +283,15 @@ with DAG(
         python_callable=task_delete_diffmerged,
     )
 
+    # UI-toggleable gate (skip_s3_upload) to skip the S3 upload/count/delete
+    # stage entirely; mirrors the cnotes_gate pattern. ignore_downstream_trigger_rules
+    # =False so a skip here doesn't force-skip cnotes_gate past its own trigger rule.
+    s3_gate = ShortCircuitOperator(
+        task_id="s3_gate",
+        python_callable=task_s3_gate,
+        ignore_downstream_trigger_rules=False,
+    )
+
     # ── Main pipeline ────────────────────────────────────────────────────────
     # Verify the DBs are free before restore flips them into RESTORING/standby mode,
     # then apply the logs dumped by the separate daily-dump DAG.
@@ -293,7 +304,9 @@ with DAG(
     # validate mapping → init deid state → run deid → status check →
     # merge → trim original diff-merged → STAGE 5: s3 upload → count → delete.
     validate_mapping >> init_deid_state >> run_deid >> check_deid_status
-    check_deid_status >> merge_deid_data >> delete_original_diffmerged >> s3_upload >> s3_count >> s3_delete
+    # s3_gate (skip_s3_upload UI toggle) can skip the whole upload/count/delete stage.
+    check_deid_status >> merge_deid_data >> delete_original_diffmerged >> s3_gate
+    s3_gate >> s3_upload >> s3_count >> s3_delete
 
     # ── cnotes sub-flow (self-contained; own state in {STATE_DIR}/cnotes) ───────
     # Always present in the graph; a ShortCircuit gate (cnotes_gate) skips the whole
@@ -307,6 +320,9 @@ with DAG(
         python_callable=task_cnotes_gate,
         # Don't force-skip past trigger-rule boundaries (init_deid_state in first mode).
         ignore_downstream_trigger_rules=False,
+        # Default mode's upstream is s3_delete, which is SKIPPED (not failed) when
+        # skip_s3_upload=True — tolerate that so cnotes still runs on its own merit.
+        trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS,
     )
     decrypt_cnotes = PythonOperator(
         task_id="decrypt_cnotes",

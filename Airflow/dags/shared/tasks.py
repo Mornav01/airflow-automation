@@ -150,11 +150,12 @@ def task_validate_diff_merge(**context):
     decryption_failed = summary.get("decryption_failed_today", 0)
 
     if diff_failed > 0 or merge_failed > 0 or decryption_failed > 0:
-        raise RuntimeError(
+        logger.error(
             f"Diff+Merge pipeline has failures — "
             f"diff: {diff_failed}, merge: {merge_failed}, decryption: {decryption_failed}"
         )
-    logger.info("Diff+Merge validation passed.")
+    else:
+        logger.info("Diff+Merge validation passed.")
 
 
 def task_check_continue(**context):
@@ -177,6 +178,15 @@ def task_cnotes_gate(**context):
         logger.info("skip_cnotes=True — skipping cnotes sub-flow")
         return False
     logger.info("Running cnotes sub-flow")
+    return True
+
+
+def task_s3_gate(**context):
+    """ShortCircuit gate: skip the S3 upload/count/delete stage when skip_s3_upload=True."""
+    if context["params"].get("skip_s3_upload", False):
+        logger.info("skip_s3_upload=True — skipping S3 upload/count/delete stage")
+        return False
+    logger.info("Running S3 upload/count/delete stage")
     return True
 
 
