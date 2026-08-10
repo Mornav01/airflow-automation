@@ -83,7 +83,7 @@ qc:
 
 # ── PII / Notes Config ───────────────────────────────────────────────
 pii_db:
-  master_connection_str: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/master"
+  master_db_name: master
 #  secondary_pii_connection_str: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/master_prod"
 
 #secondary_pii_config_path: /Users/ndaiasheville/Documents/airflow/airflow-automation/Airflow/scripts/configs/secondary_pii_config_v2.yaml

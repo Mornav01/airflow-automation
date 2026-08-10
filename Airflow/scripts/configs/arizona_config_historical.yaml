@@ -81,8 +81,8 @@ qc:
 
 # ── PII / Notes Config ───────────────────────────────────────────────
 pii_db:
-  master_connection_str: "mysql+pymysql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${MASTER_DB_NAME}"
-  secondary_pii_connection_str: "mysql+pymysql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${MASTER_DB_NAME}"
+  master_db_name: ${MASTER_DB_NAME}
+  secondary_pii_db_name: ${MASTER_DB_NAME}
 
 secondary_pii_config_path: ${SECONDARY_PII_YAML}
 

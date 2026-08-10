@@ -20,10 +20,12 @@ For each table in the CSV:
        'started' (no terminal 'failed' state; it retries on the next run).
 
 Config is read entirely from the provided config.yaml — including config_key,
-state_db_path (SQLite) or state_db_url (MySQL), and source/destination connection strings.
-If state_db_url is present in the config it takes precedence over state_db_path.
-The failed-rows DB is resolved the same way: failed_rows_db_url (MySQL) takes
-precedence over failed_rows_db_path (SQLite).
+source/destination connection strings, and the state / failed-rows databases.
+The state and failed-rows DBs are derived the same way the deid engine derives
+them (see resolved_state_db_url in deid/config/schema.py): when state_db_name
+(resp. failed_rows_db_name) is set, the DB lives on the SAME server / user /
+password as destination_db, differing only by database name; otherwise it falls
+back to SQLite at state_db_path (resp. failed_rows_db_path).
 """
 
 from __future__ import annotations
@@ -42,6 +44,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import sqlalchemy as sa
+from sqlalchemy.engine import URL, make_url
 
 
 @lru_cache(maxsize=16)
@@ -178,18 +181,23 @@ def _interpolate(obj):
 
 
 def _conn_str(db_cfg: dict) -> str:
+    """Build a SQLAlchemy URL from parts, mirroring the deid engine's
+    DbConfig.connection_string() (URL.create). Using URL.create percent-encodes
+    reserved characters in the password (e.g. '@' → '%40'), so a password like
+    'Nd@2025' no longer misparses into a bogus host such as '2025@localhost'."""
     drivers = {
         "mysql":      "mysql+pymysql",
         "mssql":      "mssql+pymssql",
         "postgresql": "postgresql+psycopg2",
     }
-    driver = drivers[db_cfg["type"]]
-    u = db_cfg["username"]
-    p = db_cfg["password"]
-    h = db_cfg["host"]
-    port = db_cfg["port"]
-    db = db_cfg["database"]
-    return f"{driver}://{u}:{p}@{h}:{port}/{db}"
+    return URL.create(
+        drivername=drivers[db_cfg["type"]],
+        username=db_cfg["username"],
+        password=db_cfg["password"],
+        host=db_cfg["host"],
+        port=int(db_cfg["port"]),
+        database=db_cfg["database"],
+    ).render_as_string(hide_password=False)
 
 
 def load_deid_config(config_yaml_path: str) -> dict:
@@ -200,18 +208,26 @@ def load_deid_config(config_yaml_path: str) -> dict:
 
 
 def _resolve_db_url(
-    cfg: dict, config_yaml_path: str, url_key: str, path_key: str, default_path: str
+    cfg: dict, config_yaml_path: str, name_key: str, path_key: str, default_path: str
 ) -> str:
     """
-    Resolve a <url_key> (MySQL, preferred) / <path_key> (SQLite) config pair
+    Resolve a <name_key> (MySQL, preferred) / <path_key> (SQLite) config pair
     into a single SQLAlchemy URL.
 
-    If <url_key> is present it takes precedence. Otherwise <path_key> is treated
-    as a SQLite path, resolved relative to the config yaml's directory when not
-    already absolute. Mirrors the state_db_url/state_db_path precedence used by v2.
+    If <name_key> is present, the database lives on the SAME server / user /
+    password as destination_db and differs only by database name — the URL is
+    built from destination_db's credentials with the database swapped. Otherwise
+    <path_key> is treated as a SQLite path, resolved relative to the config yaml's
+    directory when not already absolute.
+
+    Mirrors the deid engine's resolved_state_db_url / resolved_failed_rows_db_url
+    (deid/config/schema.py), so this check reads exactly where the engine wrote.
     """
-    if cfg.get(url_key):
-        return cfg[url_key]
+    db_name = cfg.get(name_key)
+    if db_name:
+        sibling = dict(cfg["destination_db"])
+        sibling["database"] = db_name
+        return _conn_str(sibling)
     raw_path   = cfg.get(path_key, default_path)
     config_dir = Path(config_yaml_path).parent.resolve()
     resolved   = (
@@ -484,12 +500,14 @@ def main():
     dest_conn      = _conn_str(cfg["destination_db"])
     source_db_name = cfg["source_db"]["database"]
 
-    # Prefer *_db_url (MySQL); fall back to *_db_path (SQLite)
-    state_db_url       = _resolve_db_url(cfg, args.config_yaml, "state_db_url",       "state_db_path",       "./state.db")
-    failed_rows_db_url = _resolve_db_url(cfg, args.config_yaml, "failed_rows_db_url", "failed_rows_db_path", "./failed_rows.db")
+    # Prefer *_db_name (MySQL on destination_db's server); fall back to *_db_path (SQLite)
+    state_db_url       = _resolve_db_url(cfg, args.config_yaml, "state_db_name",       "state_db_path",       "./state.db")
+    failed_rows_db_url = _resolve_db_url(cfg, args.config_yaml, "failed_rows_db_name", "failed_rows_db_path", "./failed_rows.db")
 
     logging.info("config_key=%s  state_db=%s  failed_rows_db=%s",
-                 config_key, state_db_url, failed_rows_db_url)
+                 config_key,
+                 make_url(state_db_url).render_as_string(hide_password=True),
+                 make_url(failed_rows_db_url).render_as_string(hide_password=True))
 
     # ── Read table list ───────────────────────────────────────
     with open(args.tables_filepath, newline="") as f:

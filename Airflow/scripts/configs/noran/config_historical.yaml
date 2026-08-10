@@ -85,8 +85,8 @@ qc:
 
 # ── PII / Notes Config ───────────────────────────────────────────────
 pii_db:
-  master_connection_str: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/master_pg"
-  secondary_pii_connection_str: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/master_pg"
+  master_db_name: master_pg
+  secondary_pii_db_name: master_pg
 
 secondary_pii_config_path: /Users/ndainoran/airflow_latest/airflow-automation/Airflow/scripts/configs/noran/noran_secondary_pii_config.yaml
 
