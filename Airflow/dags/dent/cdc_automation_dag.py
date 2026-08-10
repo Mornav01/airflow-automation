@@ -281,7 +281,7 @@ def create_cdc_table_task(**context):
         f"CREATE TABLE `{cdc_schema}`.`{table_name}` ("
         f"`id` bigint NOT NULL AUTO_INCREMENT, "
         f"`table_name` varchar(255) NOT NULL, "
-        f"`operation` enum('INSERT','UPDATE') NOT NULL, "
+        f"`operation` enum('INSERT','UPDATE','DELETE') NOT NULL, "
         f"`record_data` json NOT NULL, "
         f"`event_time` datetime DEFAULT CURRENT_TIMESTAMP, "
         f"`binlog_file` varchar(255) DEFAULT NULL, "
