@@ -35,12 +35,12 @@ join_db:
 config_key: incremental
 
 # ── State Storage ────────────────────────────────────────────────────
-#state_db_path: /Users/ndai/Desktop/Air_DEID_V2/airflow-automation/deid_runtime/state/state.db
-#failed_rows_db_path: /Users/ndai/Desktop/Air_DEID_V2/airflow-automation/deid_runtime/state/failed_rows.db
+state_db_path: /Users/ndai/Desktop/Air_DEID_V2/airflow-automation/deid_runtime/state/state.db
+failed_rows_db_path: /Users/ndai/Desktop/Air_DEID_V2/airflow-automation/deid_runtime/state/failed_rows.db
 # .deid_staging/ is auto-placed next to state.db (same folder)
 
-state_db_url: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/deid_state"
-failed_rows_db_url: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/deid_failed"
+state_db_name: deid_state
+failed_rows_db_name: deid_failed
 
 # ── Redis ────────────────────────────────────────────────────────────
 redis_url: redis://localhost:6379/0
