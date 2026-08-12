@@ -32,8 +32,8 @@ config_key: historical
 # .deid_staging/ is auto-placed next to state.db (same folder)
 
 
-state_db_url: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/deid_state"
-failed_rows_db_url: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/deid_failed"
+state_db_name: deid_state
+failed_rows_db_name: deid_failed
 
 
 # ── Redis ────────────────────────────────────────────────────────────
