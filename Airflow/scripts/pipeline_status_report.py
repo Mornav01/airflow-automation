@@ -9,8 +9,9 @@ per-table JSON state files — WITHOUT running any pipeline step:
     deidentification  {STATE_DIR}/{table}.json         (deid → merge → delete)
     aws_transfer      {STATE_DIR}/{table}.json         (S3 upload → delete)
 
-cnotes tables (greenway/mind) keep their own state under {STATE_DIR}/cnotes/ and
-have only deidentification + aws_transfer (no diff_merge). ecw has no cnotes, so
+cnotes tables (greenway/mind) share the main {STATE_DIR} (their names are disjoint
+from the main tables) and have only deidentification + aws_transfer (no diff_merge).
+ecw has no cnotes, so
 cnotes rows are auto-skipped when CLINICALBIN_TABLES_CSV is unset / a placeholder /
 points at a missing file — the report then shows only the main tables. One script
 serves ecw / greenway / mind; it is driven purely by the .env scoped table CSVs.
@@ -141,7 +142,7 @@ def build_rows(diff_merge_csv: str, post_process_csv: str,
             for t in main_tables]
 
     if include_cnotes:
-        cnotes_dir = os.path.join(STATE_DIR, "cnotes")
+        cnotes_dir = STATE_DIR   # cnotes shares the main STATE_DIR (disjoint table names)
         cnotes_tables = _read_tables(clinicalbin_csv)   # [] when unset/placeholder → ecw
         if cnotes_tables:
             rows += [_row("cnotes", t, _load_state(os.path.join(cnotes_dir, f"{t}.json")))

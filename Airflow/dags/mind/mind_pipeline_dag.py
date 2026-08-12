@@ -74,10 +74,11 @@ MASTER_STATE_FILE  = os.path.join(MAPPING_MASTER_STATE_DIR, "master_insurance_st
 
 _ENV = {**os.environ, "PYTHONUNBUFFERED": "1"}
 
-# cnotes sub-flow reuses the state scripts pointed at a SEPARATE state subfolder
-# ({STATE_DIR}/cnotes) via a STATE_DIR env override — db_config reads STATE_DIR from
-# os.environ (setdefault on .env load), so this pre-set value wins.
-_CNOTES_ENV = {**_ENV, "STATE_DIR": os.path.join(STATE_DIR, "cnotes")}
+# cnotes sub-flow reuses the state scripts and SHARES the main STATE_DIR (no override):
+# cnotes and main table names are disjoint (no per-table JSON collision) and the flows
+# run serialized, so the S3 count report merges into one combined count_report.csv
+# instead of each flow overwriting the other at the shared S3 key.
+_CNOTES_ENV = _ENV
 
 
 # cnotes sub-flow control (mind has no client config, so these come from env):
@@ -623,10 +624,10 @@ def task_delete_diffmerged(**context):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# cnotes sub-flow — self-contained deid lifecycle for clinical notes.
+# cnotes sub-flow — deid lifecycle for clinical notes.
 # Reuses the SAME state scripts (init / status / merge / s3) scoped to the
-# clinicalbin tables CSV + config, pointed at the {STATE_DIR}/cnotes subfolder via
-# the _CNOTES_ENV STATE_DIR override. clinicalbin_deid / decrypt_cnotes are the
+# clinicalbin tables CSV + config, sharing the main STATE_DIR via _CNOTES_ENV
+# (no override; disjoint table names). clinicalbin_deid / decrypt_cnotes are the
 # existing tasks above.
 # ══════════════════════════════════════════════════════════════════════════════
 def task_cnotes_init(**context):
@@ -880,7 +881,7 @@ with DAG(
     validate_mapping >> init_deid_state >> run_deid >> check_deid_status
     check_deid_status >> merge_deid_data >> delete_original_diffmerged >> s3_upload >> s3_count >> s3_delete
 
-    # ── cnotes sub-flow (self-contained; own state in {STATE_DIR}/cnotes) ───────
+    # ── cnotes sub-flow (shares the main STATE_DIR; disjoint table names) ───────
     # Always present in the graph; a ShortCircuit gate (cnotes_gate) skips the whole
     # chain at runtime when skip_cnotes=True (a UI checkbox, default from env). Chain:
     #   gate → decrypt → init → clinicalbin deid → status → merge → s3 upload/count/delete

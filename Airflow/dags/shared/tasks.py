@@ -437,26 +437,23 @@ def task_delete_diffmerged(**context):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# cnotes sub-flow — self-contained deid lifecycle for clinical notes (greenway/mind)
+# cnotes sub-flow — deid lifecycle for clinical notes (greenway/mind)
 #
 # Reuses the SAME state scripts as the main pipeline (init / status / merge / s3),
-# but scoped to the cnotes tables CSV + the clinicalbin config, and pointed at a
-# SEPARATE per-table JSON state subfolder ({STATE_DIR}/cnotes) via a STATE_DIR env
-# override. db_config loads .env with os.environ.setdefault(...) and reads
-# STATE_DIR = os.environ["STATE_DIR"], so a pre-set STATE_DIR wins — every cnotes
-# state file / log / S3 count CSV lands under {STATE_DIR}/cnotes, fully isolated
-# from the main run. No edits to the reused scripts are required.
+# scoped to the cnotes tables CSV + the clinicalbin config. It shares the main
+# STATE_DIR (no override): cnotes and main table names are disjoint, so their
+# per-table JSON files never collide, and the two flows run serialized in the DAG.
+# Sharing STATE_DIR lets the S3 count report merge into ONE combined count_report.csv
+# (run_count carries over the other flow's rows via the shared canonical) instead of
+# each flow overwriting the other at the shared S3 key. No edits to the reused
+# scripts are required.
 # ══════════════════════════════════════════════════════════════════════════════
-_CNOTES_STATE_SUBDIR = "cnotes"
 
 
 def _cnotes_env() -> dict:
-    """Like _env() but with STATE_DIR redirected to the {STATE_DIR}/cnotes subfolder
-    so the reused state scripts write their per-table JSON there instead of the
-    main state dir."""
-    env = _env()
-    env["STATE_DIR"] = os.path.join(os.environ.get("STATE_DIR", ""), _CNOTES_STATE_SUBDIR)
-    return env
+    """Environment for the cnotes tasks. Shares the main STATE_DIR (see the note
+    above) — kept as a thin alias of _env() so the cnotes call sites stay explicit."""
+    return _env()
 
 
 def task_cnotes_init(**context):

@@ -309,7 +309,7 @@ with DAG(
     check_deid_status >> merge_deid_data >> delete_original_diffmerged >> s3_gate
     s3_gate >> s3_upload >> s3_count >> s3_delete
 
-    # ── cnotes sub-flow (self-contained; own state in {STATE_DIR}/cnotes) ───────
+    # ── cnotes sub-flow (shares the main STATE_DIR; disjoint table names) ───────
     # Always present in the graph; a ShortCircuit gate (cnotes_gate) skips the whole
     # chain at runtime when skip_cnotes=True (a UI checkbox, default from the client
     # config). Linear chain:
