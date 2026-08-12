@@ -72,7 +72,7 @@ def _update_s3_transfer(table: str, patch: dict) -> None:
 with DAG(
     dag_id="mysql_dump_s3_transfer",
     description="Dump all tables from MySQL schema, upload to S3, drop from schema, track state",
-    schedule="0 19 * * *",
+    schedule=None,#"0 19 * * *",
     start_date=pendulum.datetime(2026, 1, 1, tz=local_tz),
     catchup=False,
     default_args=default_args,

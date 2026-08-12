@@ -86,7 +86,7 @@ def on_failure_callback(context):
 with DAG(
     dag_id="daily_dump_and_restore_pipeline",
     description="Run dump first, then restore logs",
-    schedule="0 10 * * 6",  # Runs every Saturday at 10 AM    
+    schedule=None,#"0 10 * * 6",  # Runs every Saturday at 10 AM    
     catchup=False,
     default_args=default_args,
     on_success_callback=on_success_callback,

@@ -82,7 +82,7 @@ def on_failure_callback(context):
 with DAG(
     dag_id="daily_dump_and_restore_pipeline",
     description="Daily SMB dump followed by incremental log restore",
-    schedule="0 10 * * *",
+    schedule=None,#"0 10 * * *",
     start_date=pendulum.datetime(2026, 1, 1, tz=local_tz),
     catchup=False,
     default_args=default_args,

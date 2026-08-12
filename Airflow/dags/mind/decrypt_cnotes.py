@@ -95,7 +95,7 @@ def on_failure_callback(context):
 with DAG(
     dag_id="clinicalbin_decrypt_daily",
     description="Daily incremental sync of clinicalbin_decrypted_26 from MSSQL to MySQL",
-    schedule="0 6 * * *",
+    schedule=None,#"0 6 * * *",
     start_date=pendulum.datetime(2026, 3, 10, tz=local_tz),
     catchup=False,
     default_args=default_args,

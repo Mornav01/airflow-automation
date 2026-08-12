@@ -448,7 +448,7 @@ with DAG(
     description="Runs SQL queries from a script and logs results to CSV",
     default_args=default_args,
     start_date=datetime(2024, 1, 1),
-    schedule="0 22 * * *",          # Trigger manually or set a cron e.g. "0 2 * * *"
+    schedule=None,#"0 22 * * *",          # Trigger manually or set a cron e.g. "0 2 * * *"
     catchup=False,
     tags=["sql", "etl", "reporting"],
     params={
