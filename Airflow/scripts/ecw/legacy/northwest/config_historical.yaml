@@ -31,7 +31,7 @@ config_key: historical
 #failed_rows_db_path: /Users/ndainoran/airflow_latest/airflow-automation/deid_runtime/failed_rows.db
 # .deid_staging/ is auto-placed next to state.db (same folder)
 
-sstate_db_name: deid_state
+state_db_name: deid_state
 failed_rows_db_name: deid_failed
 
 # ── Redis ────────────────────────────────────────────────────────────
