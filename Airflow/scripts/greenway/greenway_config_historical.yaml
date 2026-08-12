@@ -3,7 +3,7 @@ source_db:
   type: ${SOURCE_DB_TYPE}
   host: ${SOURCE_DB_HOST}
   port: ${SOURCE_DB_PORT}
-  database: ${PROD_DB_NAME}
+  database: ${BASE_DB_NAME}
   username: ${SOURCE_DB_USER}
   password: ${SOURCE_DB_PASS}
 
