@@ -69,6 +69,7 @@ workers:
   processors: 16
   max_retries: 1
   task_timeout: 3600
+  table_batch_size: 5   # 5 tables at a time → max 7 workers
 
 # ── Logging ──────────────────────────────────────────────────────────
 logging:
