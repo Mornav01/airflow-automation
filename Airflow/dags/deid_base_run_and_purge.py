@@ -18,13 +18,16 @@ Trigger-only DAG that, for a given deid v2 config + tables CSV:
                           DEID_MERGED_NAME (MySQL). Connections are built from .env,
                           mirroring db_config.py's cred→DB mapping. Runs only after a
                           passing check, so a bad run is left intact for inspection.
+                          Skipped unless the delete_merged_tables param is ticked.
 
 No per-table JSON state is written or read; the only state store touched is the
 failed_rows table, and only to read a count.
 
 Inputs (params, defaulted from .env, overridable at trigger time):
-  - config_yaml : DEID_BASE_PURGE_CONFIG
-  - tables_csv  : DEID_BASE_PURGE_TABLES_CSV
+  - config_yaml           : DEID_BASE_PURGE_CONFIG
+  - tables_csv            : DEID_BASE_PURGE_TABLES_CSV
+  - delete_merged_tables  : bool, default False — tick in the trigger-DAG UI to
+                            actually drop the merged tables
 """
 
 import csv
@@ -44,6 +47,8 @@ import sqlalchemy as sa
 from sqlalchemy.engine import URL
 
 from airflow import DAG
+from airflow.exceptions import AirflowSkipException
+from airflow.models.param import Param
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.task.trigger_rule import TriggerRule
 
@@ -236,6 +241,8 @@ def task_drop_merged_tables(**context):
       DEID_MERGED_NAME (MySQL)   ← DB_* creds
     """
     p = context["params"]
+    if not p.get("delete_merged_tables", False):
+        raise AirflowSkipException("delete_merged_tables is False; skipping drop of merged tables")
 
     src_drivers = {
         "mssql":      "mssql+pymssql",
@@ -292,6 +299,10 @@ with DAG(
         "config_yaml": os.environ.get("DEID_BASE_PURGE_CONFIG", ""),
         "tables_csv":  os.environ.get("DEID_BASE_PURGE_TABLES_CSV", ""),
         "max_workers": 8,
+        "delete_merged_tables": Param(
+            False, type="boolean",
+            description="Tick to DROP the merged tables (MERGED_DB_NAME + DEID_MERGED_NAME) after a passing row-count check. Default False = skip deletion.",
+        ),
     },
 ) as dag:
 
