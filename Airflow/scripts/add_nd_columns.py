@@ -15,6 +15,13 @@ CONNECTION_STRING = os.environ["ADD_ND_CONN"]
 TABLES_INPUT_FILE = os.environ["ADD_ND_TABLES_FILE"]
 LOG_FILE          = os.environ["ADD_ND_LOG_FILE"]
 DEFAULT_DATE      = os.environ["ADD_ND_DEFAULT_DATE"]
+# Fewer concurrent workers → fewer simultaneous whole-table UPDATEs → less
+# tx-log/connection pressure on large tables. Override via ADD_ND_MAX_WORKERS.
+MAX_WORKERS       = int(os.environ.get("ADD_ND_MAX_WORKERS", "4"))
+# Populate is done in bounded, per-batch-committed chunks so no single UPDATE
+# holds a multi-million-row transaction (which overwhelmed the server and reset
+# the connection). Override via ADD_ND_BATCH_SIZE.
+BATCH_SIZE        = int(os.environ.get("ADD_ND_BATCH_SIZE", "100000"))
 # ──────────────────────────────────────────────────────────────────────────────
 
 LOG_FIELDNAMES = ["table_name", "status", "timestamp", "error"]
@@ -60,62 +67,98 @@ class AddNdColumns:
         """)
         return conn.execute(q, {"tbl": table, "col": column}).scalar() > 0
 
+    # ── Helpers ────────────────────────────────────────────────────────────────
+
+    @classmethod
+    def _add_column_if_missing(cls, engine, table: str, column: str, ddl_type: str) -> None:
+        """ALTER ADD the column in its own short transaction, only if absent."""
+        with engine.begin() as conn:
+            if cls._column_exists(conn, table, column):
+                return
+            conn.execute(text(f"ALTER TABLE {table} ADD {column} {ddl_type}"))
+
     # ── The three operations ───────────────────────────────────────────────────
+    #
+    # Each op ADDs the column (idempotent) then POPULATEs the still-NULL rows in
+    # bounded, per-batch-committed chunks. This keeps every transaction small so
+    # a multi-million-row table no longer overwhelms the server (previously the
+    # single whole-table UPDATE reset the connection / timed out logins). It is
+    # also resume-safe: a re-run fills only the rows left NULL by a prior failure.
 
     @classmethod
-    def _add_nd_auto_increment_id(cls, conn, table: str):
+    def _add_nd_auto_increment_id(cls, engine, table: str):
         """
-        Add nd_auto_increment_id BIGINT if missing, then populate with
-        sequential row numbers (same logic as merge_engine._ensure_nd_auto_increment_main).
+        Add nd_auto_increment_id BIGINT if missing, then populate NULL rows with
+        sequential row numbers, batched. Numbering stays contiguous/unique across
+        batches via an offset that continues from the current MAX (same net result
+        as merge_engine._ensure_nd_auto_increment_main).
         """
-        if cls._column_exists(conn, table, "nd_auto_increment_id"):
-            print(f"         nd_auto_increment_id already exists — skipping ADD.")
-            return
+        cls._add_column_if_missing(engine, table, "nd_auto_increment_id", "BIGINT")
 
-        conn.execute(text(f"ALTER TABLE {table} ADD nd_auto_increment_id BIGINT"))
+        with engine.begin() as conn:
+            offset = conn.execute(
+                text(f"SELECT ISNULL(MAX(nd_auto_increment_id), 0) FROM {table}")
+            ).scalar() or 0
 
-        conn.execute(text(f"""
-            WITH cte AS (
-                SELECT nd_auto_increment_id,
-                       ROW_NUMBER() OVER (ORDER BY (SELECT 1)) rn
-                FROM {table}
-            )
-            UPDATE cte SET nd_auto_increment_id = rn
-        """))
-        print(f"         nd_auto_increment_id added and populated.")
+        total = 0
+        while True:
+            with engine.begin() as conn:
+                n = conn.execute(text(f"""
+                    WITH cte AS (
+                        SELECT TOP (:batch) nd_auto_increment_id,
+                               ROW_NUMBER() OVER (ORDER BY (SELECT 1)) rn
+                        FROM {table}
+                        WHERE nd_auto_increment_id IS NULL
+                    )
+                    UPDATE cte SET nd_auto_increment_id = :offset + rn
+                """), {"batch": BATCH_SIZE, "offset": int(offset)}).rowcount
+            offset += n
+            total += n
+            if n < BATCH_SIZE:
+                break
+        print(f"         nd_auto_increment_id populated ({total:,} rows, batch={BATCH_SIZE:,}).")
 
     @classmethod
-    def _add_nd_extracted_date(cls, conn, table: str):
+    def _add_nd_extracted_date(cls, engine, table: str):
         """
-        Add nd_extracted_date DATETIME if missing, then set DEFAULT_DATE
-        for all NULL rows (same logic as merge_engine._ensure_nd_extracted_date).
+        Add nd_extracted_date DATETIME if missing, then set DEFAULT_DATE for all
+        NULL rows, batched (same net result as merge_engine._ensure_nd_extracted_date).
         """
-        if cls._column_exists(conn, table, "nd_extracted_date"):
-            print(f"         nd_extracted_date already exists — skipping ADD.")
-            return
+        cls._add_column_if_missing(engine, table, "nd_extracted_date", "DATETIME")
 
-        conn.execute(text(f"ALTER TABLE {table} ADD nd_extracted_date DATETIME"))
-
-        conn.execute(text(f"""
-            UPDATE {table}
-            SET nd_extracted_date = :d
-            WHERE nd_extracted_date IS NULL
-        """), {"d": DEFAULT_DATE})
-        print(f"         nd_extracted_date added and populated with '{DEFAULT_DATE}'.")
+        total = 0
+        while True:
+            with engine.begin() as conn:
+                n = conn.execute(text(f"""
+                    UPDATE TOP (:batch) {table}
+                    SET nd_extracted_date = :d
+                    WHERE nd_extracted_date IS NULL
+                """), {"batch": BATCH_SIZE, "d": DEFAULT_DATE}).rowcount
+            total += n
+            if n < BATCH_SIZE:
+                break
+        print(f"         nd_extracted_date populated with '{DEFAULT_DATE}' ({total:,} rows).")
 
     @classmethod
-    def _add_nd_active_flag(cls, conn, table: str):
+    def _add_nd_active_flag(cls, engine, table: str):
         """
-        Add nd_ActiveFlag CHAR(1) if missing, then set 'Y' for all rows
-        (same logic as merge_engine._ensure_active_flag).
+        Add nd_ActiveFlag CHAR(1) if missing, then set 'Y' for all NULL rows,
+        batched (same net result as merge_engine._ensure_active_flag).
         """
-        if cls._column_exists(conn, table, "nd_ActiveFlag"):
-            print(f"         nd_ActiveFlag already exists — skipping ADD.")
-            return
+        cls._add_column_if_missing(engine, table, "nd_ActiveFlag", "CHAR(1)")
 
-        conn.execute(text(f"ALTER TABLE {table} ADD nd_ActiveFlag CHAR(1)"))
-        conn.execute(text(f"UPDATE {table} SET nd_ActiveFlag = 'Y'"))
-        print(f"         nd_ActiveFlag added and set to 'Y'.")
+        total = 0
+        while True:
+            with engine.begin() as conn:
+                n = conn.execute(text(f"""
+                    UPDATE TOP (:batch) {table}
+                    SET nd_ActiveFlag = 'Y'
+                    WHERE nd_ActiveFlag IS NULL
+                """), {"batch": BATCH_SIZE}).rowcount
+            total += n
+            if n < BATCH_SIZE:
+                break
+        print(f"         nd_ActiveFlag set to 'Y' ({total:,} rows).")
 
     # ── Per-table runner ───────────────────────────────────────────────────────
 
@@ -123,9 +166,11 @@ class AddNdColumns:
     def run_table(cls, table_name: str, log: dict, lock: threading.Lock,
                   engine: sqlalchemy.Engine):
         """
-        Runs all 3 column operations for the given table inside a single
-        transaction.  Skips the table if it already has a 'success' entry in
-        the log CSV.  Logs the result (success / failure) after each table.
+        Runs all 3 column operations for the given table. Each op ADDs its column
+        and populates it in per-batch-committed chunks (no single giant
+        transaction), so it survives large tables and is resume-safe. Skips the
+        table if it already has a 'success' entry in the log CSV. Logs the result
+        (success / failure) after each table.
         """
         with lock:
             if log.get(table_name, {}).get("status") == "success":
@@ -137,10 +182,9 @@ class AddNdColumns:
         error_msg = ""
 
         try:
-            with engine.begin() as conn:
-                cls._add_nd_auto_increment_id(conn, table_name)
-                cls._add_nd_extracted_date(conn, table_name)
-                cls._add_nd_active_flag(conn, table_name)
+            cls._add_nd_auto_increment_id(engine, table_name)
+            cls._add_nd_extracted_date(engine, table_name)
+            cls._add_nd_active_flag(engine, table_name)
 
             status = "success"
             print(f"[OK]   {table_name} — all 3 columns applied successfully.")
@@ -193,4 +237,4 @@ class AddNdColumns:
 
 
 if __name__ == "__main__":
-    AddNdColumns.run_all()
+    AddNdColumns.run_all(max_workers=MAX_WORKERS)

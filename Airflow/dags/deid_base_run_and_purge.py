@@ -13,11 +13,16 @@ Trigger-only DAG that, for a given deid v2 config + tables CSV:
                               source == destination + deid_failed
                           (connections built from the passed config.yaml; the
                           failed-rows count uses the engine's own
-                          get_schema_table_name). Fails the DAG on any mismatch.
+                          get_schema_table_name). Logs the names of any tables that
+                          fail the check and fails the task on any mismatch — but
+                          first publishes the passing tables via XCom so the drop
+                          step can still purge them.
   3. drop_merged_tables — DROP TABLE (per table) from MERGED_DB_NAME (MSSQL) and
                           DEID_MERGED_NAME (MySQL). Connections are built from .env,
-                          mirroring db_config.py's cred→DB mapping. Runs only after a
-                          passing check, so a bad run is left intact for inspection.
+                          mirroring db_config.py's cred→DB mapping. Runs even if the
+                          check failed (TriggerRule.ALL_DONE) but drops ONLY the tables
+                          that passed the row-count check (from XCom) — the failed
+                          tables are left intact for inspection.
                           Skipped unless the delete_merged_tables param is ticked.
 
 No per-table JSON state is written or read; the only state store touched is the
@@ -191,7 +196,10 @@ def task_run_deid(**context):
 
 def task_row_count_check(**context):
     """Verify each table: source == destination + deid_failed (== state_deid_status_check_v2).
-    Fails the DAG (raises) if any table's counts don't reconcile."""
+
+    Publishes the passing tables via XCom (key='passing_tables') so drop_merged_tables
+    can purge them even if this task fails, then logs the failed table names and raises
+    if any table's counts don't reconcile."""
     p = context["params"]
     config_yaml = p["config_yaml"]
     max_workers = int(p.get("max_workers", 8))
@@ -221,13 +229,25 @@ def task_row_count_check(**context):
         logger.info("[%s] source=%d dest=%d failed=%d", table, s, d, f)
         return (table, s, d, f, s == d + f)
 
-    mismatches = []
+    passes, mismatches = [], []
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         for table, s, d, f, ok in ex.map(_check, tables):
-            if not ok:
+            if ok:
+                passes.append(table)
+            else:
                 mismatches.append((table, s, d, f))
 
+    # Publish the passing tables BEFORE any raise, so drop_merged_tables (ALL_DONE)
+    # can purge exactly these — the failed ones are excluded and left for inspection.
+    context["ti"].xcom_push(key="passing_tables", value=passes)
+    logger.info("Row-count check: %d passed, %d failed", len(passes), len(mismatches))
+
     if mismatches:
+        failed_names = [t for t, *_ in mismatches]
+        logger.error(
+            "Row-count check FAILED for %d table(s): %s",
+            len(failed_names), ", ".join(failed_names),
+        )
         detail = ", ".join(f"{t}(src={s},dst={d},failed={f})" for t, s, d, f in mismatches)
         raise RuntimeError(f"row count mismatch (source != dest + failed): {detail}")
 
@@ -239,10 +259,19 @@ def task_drop_merged_tables(**context):
     Connections built from .env, mirroring db_config.py's cred→DB mapping:
       MERGED_DB_NAME (MSSQL)     ← SOURCE_DB_* creds
       DEID_MERGED_NAME (MySQL)   ← DB_* creds
+
+    Drops ONLY the tables that passed the row-count check (published by
+    row_count_check via XCom); tables that failed the check are left intact.
     """
     p = context["params"]
     if not p.get("delete_merged_tables", False):
         raise AirflowSkipException("delete_merged_tables is False; skipping drop of merged tables")
+
+    tables = context["ti"].xcom_pull(task_ids="row_count_check", key="passing_tables")
+    if not tables:
+        raise AirflowSkipException(
+            "no tables passed the row-count check (XCom empty/missing); nothing to drop"
+        )
 
     src_drivers = {
         "mssql":      "mssql+pymssql",
@@ -273,8 +302,10 @@ def task_drop_merged_tables(**context):
     me = _engine(mssql_url)   # MSSQL mobiledoc_diff_merged
     dm = _engine(mysql_url)   # MySQL deidentified_mobiledoc_diff_merged
 
-    tables = _tables(p["tables_csv"])
-    logger.info("Dropping %d tables from %s (MSSQL) and %s (MySQL)", len(tables), merged_db, deid_merged_db)
+    logger.info(
+        "Dropping %d passing table(s) from %s (MSSQL) and %s (MySQL)",
+        len(tables), merged_db, deid_merged_db,
+    )
     for table in tables:
         for eng, dbname in ((me, merged_db), (dm, deid_merged_db)):
             q = eng.dialect.identifier_preparer.quote(table)
@@ -320,7 +351,9 @@ with DAG(
     drop_merged_tables = PythonOperator(
         task_id="drop_merged_tables",
         python_callable=task_drop_merged_tables,
-        trigger_rule=TriggerRule.ALL_SUCCESS,  # only purge after a passing check
+        # Run even if row_count_check failed on some tables; the task itself drops
+        # only the passing tables (from XCom), leaving the failed ones intact.
+        trigger_rule=TriggerRule.ALL_DONE,
     )
 
     run_deid >> row_count_check >> drop_merged_tables

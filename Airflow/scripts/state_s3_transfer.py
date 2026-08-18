@@ -27,14 +27,14 @@ S3 layout — both prefixes come straight from .env, dated by --run_date:
 
   {S3_INCREMENTAL_DUMP_PATH_PREFIX}/{MMDDYYYY}/{schema}/{table}.sql
   {S3_INCREMENTAL_DUMP_PATH_PREFIX}/{MMDDYYYY}/sql_dump_stats.csv
-  {S3_COUNT_REPORT_PATH_PREFIX}/{MMDDYYYY}/count_report.csv
+  {S3_COUNT_REPORT_PATH_PREFIX}/{MMDDYYYY}/merge_stats.csv
 
 i.e. with S3_INCREMENTAL_DUMP_PATH_PREFIX=EHR/nd_incremental and
      S3_COUNT_REPORT_PATH_PREFIX=EHR/merge_stats:
 
   EHR/nd_incremental/08042026/deidentified_staging/enc.sql
   EHR/nd_incremental/08042026/sql_dump_stats.csv
-  EHR/merge_stats/08042026/count_report.csv
+  EHR/merge_stats/08042026/merge_stats.csv
 
 Every date in this script derives from --run_date. The host clock is read in
 exactly one place: the --run_date default, for manual invocations.
@@ -86,7 +86,7 @@ S3_BUCKET = os.environ.get("S3_BUCKET") or None
 # Full S3 key prefixes, maintained centrally in .env (each already includes the
 # top-level EHR folder). A dated MMDDYYYY folder is appended per run.
 #   S3_INCREMENTAL_DUMP_PATH_PREFIX → the .sql payload + sql_dump_stats.csv
-#   S3_COUNT_REPORT_PATH_PREFIX     → count_report.csv
+#   S3_COUNT_REPORT_PATH_PREFIX     → merge_stats.csv
 S3_INCREMENTAL_PREFIX = os.environ.get(
     "S3_INCREMENTAL_DUMP_PATH_PREFIX", "EHR/nd_incremental").strip("/")
 S3_COUNT_PREFIX = os.environ.get(
@@ -100,9 +100,10 @@ BASE_PATH = os.environ.get("DATA_TRANSFER_BASE_PATH", "")
 COUNT_SCHEMA = os.environ.get("DEID_BASE_NAME")
 
 # Cumulative count CSV persisted across runs. Uploaded to
-#     {S3_COUNT_REPORT_PATH_PREFIX}/{MMDDYYYY of run_date}/count_report.csv
+#     {S3_COUNT_REPORT_PATH_PREFIX}/{MMDDYYYY of run_date}/merge_stats.csv
 COUNT_DIR = os.path.join(STATE_DIR, "aws_transfer")
-COUNT_CSV = os.path.join(COUNT_DIR, "count_report.csv")
+COUNT_FILENAME = "merge_stats.csv"
+COUNT_CSV = os.path.join(COUNT_DIR, COUNT_FILENAME)
 COUNT_FIELDS = ["table_name", "row_count_total", "row_count_active", "snapshot_date", "created_at"]
 
 # Manifest of the .sql files uploaded in THIS run (scoped tables only — skipped
@@ -188,7 +189,7 @@ def _default_stats_prefix(run_date: str) -> str:
 
 
 def _default_count_prefix(run_date: str) -> str:
-    """EHR/merge_stats/MMDDYYYY — holds count_report.csv."""
+    """EHR/merge_stats/MMDDYYYY — holds merge_stats.csv."""
     return f"{S3_COUNT_PREFIX}/{_date_folder(run_date)}"
 
 
@@ -244,7 +245,7 @@ def _write_upload_manifest(rows: list[dict], upload_folder: str, stats_prefix: s
 
     rows.sort(key=lambda r: r["file_path"])  # deterministic regardless of completion order
 
-    # Local copy sits in the run's dated folder, next to count_report.csv.
+    # Local copy sits in the run's dated folder, next to merge_stats.csv.
     local_dir = os.path.join(BASE_PATH, upload_folder)
     os.makedirs(local_dir, exist_ok=True)
     local = os.path.join(local_dir, STATS_FILENAME)
@@ -492,13 +493,13 @@ def run_count(schema, tables, run_date, destination_prefix):
     date_folder = _date_folder(run_date)
     dated_dir = os.path.join(BASE_PATH, date_folder)
     os.makedirs(dated_dir, exist_ok=True)
-    dated_csv = os.path.join(dated_dir, "count_report.csv")
+    dated_csv = os.path.join(dated_dir, COUNT_FILENAME)
     with open(dated_csv, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=COUNT_FIELDS)
         w.writeheader(); w.writerows(rows)
 
     if S3_BUCKET:
-        _s3_client().upload_file(dated_csv, S3_BUCKET, f"{destination_prefix}/count_report.csv")
+        _s3_client().upload_file(dated_csv, S3_BUCKET, f"{destination_prefix}/{COUNT_FILENAME}")
 
     logger.info("Count report: %d scoped queried, %d total rows → %s", queried, len(rows), COUNT_CSV)
 
@@ -557,7 +558,7 @@ def main():
                    help="S3 prefix for sql_dump_stats.csv "
                         "(default: {S3_INCREMENTAL_DUMP_PATH_PREFIX}/{MMDDYYYY of run_date})")
     p.add_argument("--count_prefix", default=None,
-                   help="S3 prefix for count_report.csv "
+                   help="S3 prefix for merge_stats.csv "
                         "(default: {S3_COUNT_REPORT_PATH_PREFIX}/{MMDDYYYY of run_date})")
     p.add_argument("--max-workers", type=int, default=4)
     args = p.parse_args()
