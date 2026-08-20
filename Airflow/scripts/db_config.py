@@ -162,6 +162,7 @@ MAPPING_SOURCE_CONN = {
 }
 MAPPING_DEST_CONN = {
     "host":     os.environ.get("MAPPING_DEST_HOST", ""),
+    "port":     int(os.environ.get("MAPPING_DEST_PORT", "3306")),
     "database": os.environ.get("MAPPING_DEST_DATABASE", ""),
     "user":     os.environ.get("MAPPING_DEST_USER", ""),
     "password": os.environ.get("MAPPING_DEST_PASSWORD", ""),

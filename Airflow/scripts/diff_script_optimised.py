@@ -31,8 +31,10 @@ Usage:
 """
 
 import argparse
+import datetime
 import logging
 import os
+import re
 from collections import Counter
 from functools import lru_cache
 from typing import Optional
@@ -40,6 +42,35 @@ from typing import Optional
 import pandas as pd
 import sqlalchemy as sa
 from sqlalchemy import text
+
+
+def _load_env_file(path: str) -> None:
+    """Load Airflow/.env into os.environ (setdefault — never overrides an
+    already-set var). Mirrors db_config.py's loader so this script works the
+    same way whether run standalone or from Airflow."""
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key, val = key.strip(), val.strip()
+                if val[:1] in ("'", '"'):
+                    q = val[0]
+                    end = val.find(q, 1)
+                    val = val[1:end] if end != -1 else val[1:]
+                else:
+                    c = re.search(r"\s#", val)
+                    if c:
+                        val = val[:c.start()]
+                    val = val.strip()
+                os.environ.setdefault(key, val)
+    except FileNotFoundError:
+        pass
+
+
+_load_env_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -287,8 +318,18 @@ def _fmt_pk_val(v) -> str:
     """Format a single PK column value for embedding in SQL."""
     if isinstance(v, str):
         return "'" + v.replace("'", "''") + "'"
-    if v is None:
+    if v is None or pd.isna(v):
+        # pd.isna() also catches pd.NaT, which — surprisingly — passes
+        # isinstance(v, datetime.date) too and must not reach the branch below.
         return "NULL"
+    if isinstance(v, datetime.datetime):
+        # Legacy SQL Server DATETIME columns only accept 3 fractional-second
+        # digits in a string literal — pandas.Timestamp always stringifies to
+        # 6 (microseconds), which SQL Server rejects outright (error 241)
+        # instead of rounding. Truncate to milliseconds to match.
+        return "'" + v.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] + "'"
+    if isinstance(v, datetime.date):
+        return "'" + v.isoformat() + "'"
     return str(v)
 
 
@@ -512,6 +553,9 @@ def diff_without_pk(
         else:
             mask.append(True)
 
+    # Explicit bool dtype — a plain empty list is ambiguous to pandas and gets
+    # treated as "select these (zero) columns" instead of "select these (zero) rows".
+    mask = pd.Series(mask, dtype=bool, index=new_df.index)
     new_or_changed = new_df[mask][all_new_cols]
     insert_to_diff(diff_engine, new_or_changed, table, schema, "NEW_OR_CHANGED")
 

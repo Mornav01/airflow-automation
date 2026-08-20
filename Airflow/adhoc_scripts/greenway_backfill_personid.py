@@ -39,7 +39,7 @@ SQL_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "scripts", "sql", "greenway", "patient_mapping.sql"
 )
 
-TABLE = "patient_mapping_table_test"
+TABLE = "patient_mapping_table"
 BATCH_SIZE = 1000
 
 

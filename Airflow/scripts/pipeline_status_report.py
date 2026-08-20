@@ -51,6 +51,7 @@ logger = logging.getLogger(__name__)
 FIELDS = [
     "scope", "table",
     "diff_merge_status", "diff_merge_extracted_at", "diff_merge_is_merged",
+    "diff_merge_message", "merge_message",
     "deid_status", "deid_is_merged", "deid_is_deleted",
     "deid_rows_original", "deid_rows_deid", "deid_failed_count", "deid_last_processed",
     "aws_status", "aws_last_date", "aws_is_deleted",
@@ -111,6 +112,8 @@ def _row(scope: str, table: str, state: dict) -> dict:
         "diff_merge_status":      dm.get("extraction_status", ""),
         "diff_merge_extracted_at": dm.get("extraction_datetime", ""),
         "diff_merge_is_merged":   dm.get("is_merged", ""),
+        "diff_merge_message":     dm.get("extraction_Message", ""),
+        "merge_message":          dm.get("merge_Message", ""),
         "deid_status":            deid.get("deidentification_status", ""),
         "deid_is_merged":         deid.get("is_merged", ""),
         "deid_is_deleted":        deid.get("is_deleted", ""),

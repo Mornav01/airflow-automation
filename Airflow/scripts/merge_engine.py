@@ -408,7 +408,7 @@ class MergeEngine:
         self._log("Step 4: prepare DIFF table")
         self._ensure_nd_auto_increment_diff(table)
         self._populate_diff_nd_from_main(table, pk_cols)
-        self._ensure_active_flag(self.diff_engine, self.diff_db, table)
+        self._ensure_active_flag(self.diff_engine, self.diff_db, table, force_reset=True)
         if pk_cols:
             _ensure_active_index(self.diff_engine, self.diff_db, table, pk_cols, self.db_type)
             self._normalize_active_by_pk(self.diff_engine, self.diff_db, table, pk_cols)
@@ -798,19 +798,39 @@ class MergeEngine:
         self._log(f"DIFF.{table} — nd_auto_increment_id populated for {null_count} rows starting from {max_nd + 1}")
 
 
-    def _ensure_active_flag(self, engine: Engine, db: str, table: str):
-        if self._column_exists(engine, db, table, "nd_ActiveFlag"):
+    def _ensure_active_flag(self, engine: Engine, db: str, table: str, force_reset: bool = False):
+        """Ensure nd_ActiveFlag exists and is 'Y' where appropriate.
+
+        force_reset=True unconditionally resets every row to 'Y' even when the
+        column already exists — used for DIFF, which only ever holds the
+        current delta batch, so every row in it should enter step 5 as 'Y'
+        (the following _normalize_active_by_pk then demotes any duplicate-PK
+        stragglers). Without this, a DIFF table that already has the column
+        from an earlier interrupted/resumed merge attempt would silently keep
+        whatever value (often NULL) its rows already carry, since nothing
+        else in the pipeline ever sets nd_ActiveFlag on DIFF.
+
+        force_reset=False (default, used for MAIN) preserves the one-time
+        add+set behavior — MAIN holds full history, so it must not be
+        blanket-reset every cycle; its per-row lifecycle is instead managed
+        incrementally via _raw_deactivate + _normalize_active_by_pk.
+        """
+        exists = self._column_exists(engine, db, table, "nd_ActiveFlag")
+        if exists and not force_reset:
             self._log(f"nd_ActiveFlag already exists on {db}.{table} — skipping")
             return
-        self._log(f"Adding nd_ActiveFlag to {db}.{table}")
+
+        self._log(f"{'Resetting' if exists else 'Adding'} nd_ActiveFlag to 'Y' on {db}.{table}")
         with engine.begin() as conn:
             if self.db_type == "mysql":
-                conn.execute(text(f"ALTER TABLE `{db}`.`{table}` ADD nd_ActiveFlag CHAR(1)"))
+                if not exists:
+                    conn.execute(text(f"ALTER TABLE `{db}`.`{table}` ADD nd_ActiveFlag CHAR(1)"))
                 conn.execute(text(f"UPDATE `{db}`.`{table}` SET nd_ActiveFlag = 'Y'"))
             else:
-                conn.execute(text(f"ALTER TABLE {table} ADD nd_ActiveFlag CHAR(1)"))
+                if not exists:
+                    conn.execute(text(f"ALTER TABLE {table} ADD nd_ActiveFlag CHAR(1)"))
                 conn.execute(text(f"UPDATE {table} SET nd_ActiveFlag = 'Y'"))
-        self._log(f"nd_ActiveFlag added and set to Y on {db}.{table}")
+        self._log(f"nd_ActiveFlag set to Y on {db}.{table}")
 
     def _normalize_active_by_pk(self, engine: Engine, db: str, table: str, pk_cols: List[str]):
         if not pk_cols:
