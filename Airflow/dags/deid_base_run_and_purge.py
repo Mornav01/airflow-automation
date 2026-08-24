@@ -31,6 +31,9 @@ failed_rows table, and only to read a count.
 Inputs (params, defaulted from .env, overridable at trigger time):
   - config_yaml           : DEID_BASE_PURGE_CONFIG
   - tables_csv            : DEID_BASE_PURGE_TABLES_CSV
+  - skip_deid             : bool, default False — tick in the trigger-DAG UI to
+                            skip run_deid and go straight to row_count_check
+                            (useful for re-running just the check + purge)
   - delete_merged_tables  : bool, default False — tick in the trigger-DAG UI to
                             actually drop the merged tables
 """
@@ -177,8 +180,14 @@ def _failed_count(engine, failed_table: str, table: str, config_key: str) -> int
 # ──────────────────────────────────────────────────────────────────────────────
 def task_run_deid(**context):
     """Run deidentification to completion via manual_deidentification_run_v2.py
-    (which invokes `deid run --rerun`). Blocks; streams output to the Airflow log."""
+    (which invokes `deid run --rerun`). Blocks; streams output to the Airflow log.
+
+    Skipped entirely when the skip_deid param is ticked, so the DAG can be
+    re-triggered to run only row_count_check + drop_merged_tables."""
     p = context["params"]
+    if p.get("skip_deid", False):
+        raise AirflowSkipException("skip_deid is True; skipping run_deid")
+
     config_yaml = p["config_yaml"]
     tables_csv = p["tables_csv"]
     if not config_yaml or not os.path.exists(config_yaml):
@@ -330,6 +339,11 @@ with DAG(
         "config_yaml": os.environ.get("DEID_BASE_PURGE_CONFIG", ""),
         "tables_csv":  os.environ.get("DEID_BASE_PURGE_TABLES_CSV", ""),
         "max_workers": 8,
+        "skip_deid": Param(
+            False, type="boolean",
+            description="Tick to skip run_deid and go straight to row_count_check "
+                        "(and drop_merged_tables, if also ticked). Default False = run deid.",
+        ),
         "delete_merged_tables": Param(
             False, type="boolean",
             description="Tick to DROP the merged tables (MERGED_DB_NAME + DEID_MERGED_NAME) after a passing row-count check. Default False = skip deletion.",
@@ -346,6 +360,9 @@ with DAG(
     row_count_check = PythonOperator(
         task_id="row_count_check",
         python_callable=task_row_count_check,
+        # Must still run when run_deid was skipped (skip_deid=True); NONE_FAILED
+        # allows a skipped upstream through but still blocks on an actual failure.
+        trigger_rule=TriggerRule.NONE_FAILED,
     )
 
     drop_merged_tables = PythonOperator(
