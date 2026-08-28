@@ -6,18 +6,16 @@ Runs BEFORE `deid run` to initialize the JSON state files for each table.
 Equivalent to the state-writing portion of state_deidentification_run_polar.py.
 
 For each table in the CSV, init is CONDITIONAL (resumable per-table cycle):
-  - Reset the deidentification section ONLY when the previous cycle is not
-    mid-flight, i.e. when:
-        deidentification_status != "success"          (a fresh/started/retry cycle), OR
-        deidentification_status == "success" AND is_merged AND is_deleted
-                                                      (previous cycle fully done → new cycle)
+  - Reset the deidentification section UNLESS the previous cycle is stuck
+    between merge and delete, i.e. skip only when:
+        deidentification_status == "success" AND is_merged AND NOT is_deleted
   - On reset:
       deidentification_status: "started"
       last_processed_datetime: now (full ISO timestamp)
       is_merged:               False
       is_deleted:              False
-  - Otherwise (success but not yet merged/deleted) LEAVE the block untouched so
-    the merge/delete steps can resume the in-progress cycle on the next run.
+  - Otherwise (merged but not yet deleted) LEAVE the block untouched so the
+    delete step can resume the in-progress cycle on the next run.
 """
 
 from __future__ import annotations
@@ -93,16 +91,18 @@ class StateManager:
 # ============================================================
 
 def _should_init(deid: dict) -> bool:
-    """Init only when the previous cycle is NOT mid-flight.
+    """Init unless the previous cycle is stuck between merge and delete.
 
     Run when: status != 'success'  (fresh / started / retry), OR
-              status == 'success' AND is_merged AND is_deleted  (prev cycle done).
-    Skip when: status == 'success' but not (is_merged AND is_deleted) — mid-cycle,
-    so merge/delete can resume it.
+              status == 'success' AND NOT (is_merged AND NOT is_deleted).
+    Skip only when: status == 'success' AND is_merged AND NOT is_deleted —
+    merged but not yet deleted, so the delete step can resume it.
     """
     if deid.get("deidentification_status") != "success":
         return True
-    return bool(deid.get("is_merged")) and bool(deid.get("is_deleted"))
+    is_merged  = bool(deid.get("is_merged"))
+    is_deleted = bool(deid.get("is_deleted"))
+    return not (is_merged and not is_deleted)
 
 
 def init_table_state(table_name: str, state_manager: StateManager):

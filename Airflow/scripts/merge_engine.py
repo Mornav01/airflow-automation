@@ -176,17 +176,26 @@ def _deactivate_mysql(engine: Engine, db: str, table: str,
             ) ENGINE=MEMORY
         """)
 
+        # Deactivate one chunk at a time and empty the temp table between
+        # chunks, so its peak size stays bounded by `chunk` PK rows instead
+        # of growing with the full table — no ceiling to raise regardless
+        # of how large `pk_df` gets.
+        deactivated = 0
         for i in range(0, total, chunk):
             batch_rows = rows[i:i + chunk]
             cur.executemany(ins_sql, batch_rows)
 
-        cur.execute(f"""
-            UPDATE `{db}`.`{table}` m
-            JOIN `{tmp}` t ON {join_cond}
-            SET m.nd_ActiveFlag = 'N'
-            WHERE m.nd_ActiveFlag = 'Y'
-        """)
-        logging.info("[_deactivate_mysql] [%s] deactivated %d rows", table, cur.rowcount)
+            cur.execute(f"""
+                UPDATE `{db}`.`{table}` m
+                JOIN `{tmp}` t ON {join_cond}
+                SET m.nd_ActiveFlag = 'N'
+                WHERE m.nd_ActiveFlag = 'Y'
+            """)
+            deactivated += cur.rowcount
+
+            cur.execute(f"TRUNCATE TABLE `{tmp}`")
+
+        logging.info("[_deactivate_mysql] [%s] deactivated %d rows", table, deactivated)
 
         cur.execute(f"DROP TEMPORARY TABLE `{tmp}`")
         raw.commit()

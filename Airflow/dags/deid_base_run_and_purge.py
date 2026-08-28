@@ -315,12 +315,27 @@ def task_drop_merged_tables(**context):
         "Dropping %d passing table(s) from %s (MSSQL) and %s (MySQL)",
         len(tables), merged_db, deid_merged_db,
     )
+    dropped = 0
+    errors = []
     for table in tables:
         for eng, dbname in ((me, merged_db), (dm, deid_merged_db)):
             q = eng.dialect.identifier_preparer.quote(table)
-            with eng.begin() as conn:
-                conn.execute(sa.text(f"DROP TABLE IF EXISTS {q}"))
-            logger.info("[%s] dropped from %s", table, dbname)
+            try:
+                with eng.begin() as conn:
+                    conn.execute(sa.text(f"DROP TABLE IF EXISTS {q}"))
+                logger.info("[%s] dropped from %s", table, dbname)
+                dropped += 1
+            except sa.exc.DBAPIError as e:
+                errors.append((table, dbname, str(e)))
+                logger.error("[%s] failed to drop from %s: %s", table, dbname, e)
+
+    logger.info(
+        "Drop complete: %d/%d table/db operation(s) succeeded, %d failed",
+        dropped, len(tables) * 2, len(errors),
+    )
+    if errors:
+        detail = "; ".join(f"{t}@{db}: {err}" for t, db, err in errors)
+        raise RuntimeError(f"{len(errors)} drop operation(s) failed: {detail}")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
