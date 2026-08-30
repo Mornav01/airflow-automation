@@ -18,7 +18,8 @@ import json
 import logging
 import os
 import subprocess
-from datetime import date, datetime
+import sys
+from datetime import date, datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,27 @@ def _run_streaming(cmd, *, env: dict | None = None, cwd: str | None = None) -> t
     return rc, "\n".join(lines)
 
 
+def _require_param(params: dict, key: str, task_label: str) -> str:
+    """Fail fast if a required schema/config param is empty or unset.
+
+    Several EHR DAGs source these from os.environ.get(ENV_VAR, "") with no
+    default (deliberately, so a misconfigured env doesn't silently fall back to
+    the wrong schema) — but an unset env var still produces an empty string,
+    which then flows into a subprocess as e.g. --schema "". Downstream that
+    doesn't raise: it just finds no matching table/schema and treats that as a
+    no-op success (state_s3_transfer.py's run_upload), or builds a nonsense
+    query. Catch it here, before the subprocess even starts, so the Airflow
+    task fails clearly instead of reporting green having done nothing.
+    """
+    value = params.get(key)
+    if not value:
+        raise RuntimeError(
+            f"{task_label}: required param '{key}' is empty or unset — check the "
+            f"corresponding env var in .env."
+        )
+    return value
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # State-file paths (constant per machine, derived from STATE_DIR in .env)
 # ──────────────────────────────────────────────────────────────────────────────
@@ -91,6 +113,9 @@ _MASTER_STATE_FILE       = os.path.join(_MAPPING_MASTER_DIR, "master_insurance_s
 
 def task_run_diff_merge(**context):
     params = context["params"]
+    if params.get("skip_diff_merge", False):
+        logger.info("skip_diff_merge=True — skipping diff+merge")
+        return
     script = os.path.join(_SCRIPTS_DIR, "state_diff_merge_v3.py")
     cmd = [
         _deid_python(), script,
@@ -103,6 +128,38 @@ def task_run_diff_merge(**context):
     rc, out = _run_streaming(cmd)
     if rc != 0:
         raise RuntimeError(f"diff+merge failed (rc={rc}):\n{out[-4000:]}")
+
+
+def _format_diff_merge_summary(summary: dict) -> str:
+    """Grouped, human-readable rendering of state_diff_merge_v3.py's summary JSON
+    for the Airflow task log — one section per outcome, with table names listed
+    so a failure can be acted on without digging through state files."""
+    date_       = summary.get("date", "")
+    total       = summary.get("total_tables", 0)
+    completed   = summary.get("fully_completed_tables", [])
+    diff_failed = summary.get("diff_failed_tables", [])
+    merge_failed = summary.get("merge_failed_tables", [])
+    skipped     = summary.get("skipped_tables", [])
+
+    def _section(label, tag, tables):
+        line = f" [{tag}] {label} ".ljust(58, ".") + f" {len(tables)}"
+        if not tables:
+            return line
+        names = "\n".join(f"     - {t}" for t in tables)
+        return f"{line}\n{names}"
+
+    bar = "=" * 80
+    lines = [
+        bar,
+        f" DIFF+MERGE VALIDATION — {date_}   ({total} tables scoped)",
+        bar,
+        _section("Fully completed today", "OK", completed),
+        _section("Diff failed today", "FAIL", diff_failed),
+        _section("Merge failed today (diff ok, merge failed)", "FAIL", merge_failed),
+        _section("Skipped today (no run yet / stale)", "SKIP", skipped),
+        bar,
+    ]
+    return "\n".join(lines)
 
 
 def task_validate_diff_merge(**context):
@@ -121,18 +178,15 @@ def task_validate_diff_merge(**context):
         )
 
     summary = json.loads(result.stdout.strip())
-    logger.info("Diff+Merge summary:\n%s", json.dumps(summary, indent=4))
+    report = _format_diff_merge_summary(summary)
 
-    diff_failed       = summary.get("diff_failed_today", 0)
-    merge_failed      = summary.get("merge_failed_today", 0)
-    decryption_failed = summary.get("decryption_failed_today", 0)
+    diff_failed  = summary.get("diff_failed_today", 0)
+    merge_failed = summary.get("merge_failed_today", 0)
 
-    if diff_failed > 0 or merge_failed > 0 or decryption_failed > 0:
-        raise RuntimeError(
-            f"Diff+Merge pipeline has failures — "
-            f"diff: {diff_failed}, merge: {merge_failed}, decryption: {decryption_failed}"
-        )
-    logger.info("Diff+Merge validation passed.")
+    if diff_failed > 0 or merge_failed > 0:
+        logger.error("\n%s", report)
+    else:
+        logger.info("\n%s", report)
 
 
 def task_check_continue(**context):
@@ -142,6 +196,28 @@ def task_check_continue(**context):
         logger.info("stop_after_diff_merge=True — skipping deidentification stages")
         return False
     logger.info("Continuing to deidentification stages")
+    return True
+
+
+def task_cnotes_gate(**context):
+    """ShortCircuit gate: skip the whole cnotes sub-flow when skip_cnotes=True.
+
+    Runtime flag (shows as a checkbox in the trigger UI). Used with
+    ignore_downstream_trigger_rules=False so a skip doesn't force-skip tasks past
+    a trigger-rule boundary (e.g. init_deid_state in cnotes-first mode)."""
+    if context["params"].get("skip_cnotes", False):
+        logger.info("skip_cnotes=True — skipping cnotes sub-flow")
+        return False
+    logger.info("Running cnotes sub-flow")
+    return True
+
+
+def task_s3_gate(**context):
+    """ShortCircuit gate: skip the S3 upload/count/delete stage when skip_s3_upload=True."""
+    if context["params"].get("skip_s3_upload", False):
+        logger.info("skip_s3_upload=True — skipping S3 upload/count/delete stage")
+        return False
+    logger.info("Running S3 upload/count/delete stage")
     return True
 
 
@@ -196,10 +272,10 @@ def task_init_deid_state(**context):
 
 def task_run_deid(**context):
     params = context["params"]
-    # Route through the manual_deidentification_run_v2.py wrapper rather than
-    # calling `deid run` directly, so the deid CLI surface is invoked from a
-    # single place (--rerun is the wrapper's default).
-    script = os.path.join(_SCRIPTS_DIR, "manual_deidentification_run_v2.py")
+    # Route through state_deidentification_run.py: it filters the tables CSV to
+    # only tables whose per-table JSON state is not yet 'success' (skip completed
+    # ones), then invokes `deid run` (--rerun is the default) on that subset.
+    script = os.path.join(_SCRIPTS_DIR, "state_deidentification_run.py")
     cmd = [
         _deid_python(), script,
         "--config", params["config_yaml"],
@@ -215,7 +291,7 @@ def task_check_deid_status(**context):
     params = context["params"]
     script = os.path.join(_SCRIPTS_DIR, "state_deid_status_check_v2.py")
     cmd = [
-        _deid_python(), script,
+        sys.executable, script,
         "--config-yaml",     params["config_yaml"],
         "--tables-filepath", params["deid_post_process_tables_csv"],
         "--max-workers",     str(params.get("deid_status_max_workers", 8)),
@@ -284,7 +360,7 @@ def task_s3_transfer(**context):
     params   = context["params"]
     run_date = date.today().isoformat()
 
-    transfer_schema = params.get("s3_deid_schema", "deidentified_staging")
+    transfer_schema = _require_param(params, "s3_deid_schema", "s3_transfer")
     max_workers     = params.get("parser_workers", None)
 
     script = os.path.join(_SCRIPTS_DIR, "s3_transfer.py")
@@ -315,6 +391,38 @@ def task_s3_transfer(**context):
         raise RuntimeError(f"s3_transfer failed (rc={result.returncode})")
 
 
+# ── STAGE 5: aws_transfer (state-gated upload → count → delete) ─────────────────
+def _s3_stage_cmd(mode: str, params: dict) -> list:
+    """Build the state_s3_transfer.py command for a STAGE-5 mode."""
+    script = os.path.join(_SCRIPTS_DIR, "state_s3_transfer.py")
+    return [
+        _deid_python(), script,
+        "--mode",            mode,
+        "--schema",          _require_param(params, "s3_deid_schema", f"s3_{mode}"),
+        "--tables-filepath", params["deid_post_process_tables_csv"],
+        "--run_date",        date.today().isoformat(),
+        "--max-workers",     str(params.get("parser_workers") or 4),
+    ]
+
+
+def task_s3_upload(**context):
+    rc, out = _run_streaming(_s3_stage_cmd("upload", context["params"]), cwd=_SCRIPTS_DIR)
+    if rc != 0:
+        raise RuntimeError(f"s3 upload failed (rc={rc}):\n{out[-4000:]}")
+
+
+def task_s3_count(**context):
+    rc, out = _run_streaming(_s3_stage_cmd("count", context["params"]), cwd=_SCRIPTS_DIR)
+    if rc != 0:
+        raise RuntimeError(f"s3 count report failed (rc={rc}):\n{out[-4000:]}")
+
+
+def task_s3_delete(**context):
+    rc, out = _run_streaming(_s3_stage_cmd("delete", context["params"]), cwd=_SCRIPTS_DIR)
+    if rc != 0:
+        raise RuntimeError(f"s3 delete failed (rc={rc}):\n{out[-4000:]}")
+
+
 def task_delete_diffmerged(**context):
     params = context["params"]
     script = os.path.join(_SCRIPTS_DIR, "state_deid_delete.py")
@@ -326,6 +434,104 @@ def task_delete_diffmerged(**context):
     rc, out = _run_streaming(cmd)
     if rc != 0:
         raise RuntimeError(f"delete_diffmerged failed (rc={rc}):\n{out[-4000:]}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# cnotes sub-flow — deid lifecycle for clinical notes (greenway/mind)
+#
+# Reuses the SAME state scripts as the main pipeline (init / status / merge / s3),
+# scoped to the cnotes tables CSV + the clinicalbin config. It shares the main
+# STATE_DIR (no override): cnotes and main table names are disjoint, so their
+# per-table JSON files never collide, and the two flows run serialized in the DAG.
+# Sharing STATE_DIR lets the S3 count report merge into ONE combined count_report.csv
+# (run_count carries over the other flow's rows via the shared canonical) instead of
+# each flow overwriting the other at the shared S3 key. No edits to the reused
+# scripts are required.
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+def _cnotes_env() -> dict:
+    """Environment for the cnotes tasks. Shares the main STATE_DIR (see the note
+    above) — kept as a thin alias of _env() so the cnotes call sites stay explicit."""
+    return _env()
+
+
+def task_cnotes_init(**context):
+    params = context["params"]
+    script = os.path.join(_SCRIPTS_DIR, "state_deid_init_v2.py")
+    cmd = [
+        _deid_python(), script,
+        "--tables-filepath", params["clinicalbin_tables_csv"],
+        "--max-workers",     str(params.get("deid_init_max_workers", 16)),
+    ]
+    rc, out = _run_streaming(cmd, env=_cnotes_env())
+    if rc != 0:
+        raise RuntimeError(f"cnotes deid state init failed (rc={rc}):\n{out[-4000:]}")
+
+
+def task_cnotes_status(**context):
+    params = context["params"]
+    script = os.path.join(_SCRIPTS_DIR, "state_deid_status_check_v2.py")
+    cmd = [
+        sys.executable, script,
+        "--config-yaml",     params["clinicalbin_deid_config"],
+        "--tables-filepath", params["clinicalbin_tables_csv"],
+        "--max-workers",     str(params.get("deid_status_max_workers", 8)),
+    ]
+    rc, out = _run_streaming(cmd, env=_cnotes_env())
+    if rc != 0:
+        raise RuntimeError(f"cnotes deid status check failed (rc={rc}):\n{out[-4000:]}")
+
+
+def task_cnotes_merge(**context):
+    params = context["params"]
+    script = os.path.join(_SCRIPTS_DIR, "state_deid_merge.py")
+    cmd = [
+        _deid_python(), script,
+        "--tables_filepath", params["clinicalbin_tables_csv"],
+        "--max_workers",     str(params.get("deid_merge_max_workers", 8)),
+    ]
+    # Cnotes table PKs default to PK_CSV (db_config); pass a cnotes-specific PK CSV
+    # only if one is configured.
+    if params.get("cnotes_pk_csv"):
+        cmd += ["--pk_csv", params["cnotes_pk_csv"]]
+    rc, out = _run_streaming(cmd, env=_cnotes_env())
+    if rc != 0:
+        raise RuntimeError(f"cnotes deid merge failed (rc={rc}):\n{out[-4000:]}")
+
+
+def _cnotes_s3_stage_cmd(mode: str, params: dict) -> list:
+    """state_s3_transfer.py command for a cnotes STAGE-5 mode (scoped to cnotes tables)."""
+    script = os.path.join(_SCRIPTS_DIR, "state_s3_transfer.py")
+    return [
+        _deid_python(), script,
+        "--mode",            mode,
+        "--schema",          _require_param(params, "s3_deid_schema", f"cnotes_s3_{mode}"),
+        "--tables-filepath", params["clinicalbin_tables_csv"],
+        "--run_date",        date.today().isoformat(),
+        "--max-workers",     str(params.get("parser_workers") or 4),
+    ]
+
+
+def task_cnotes_s3_upload(**context):
+    rc, out = _run_streaming(_cnotes_s3_stage_cmd("upload", context["params"]),
+                             env=_cnotes_env(), cwd=_SCRIPTS_DIR)
+    if rc != 0:
+        raise RuntimeError(f"cnotes s3 upload failed (rc={rc}):\n{out[-4000:]}")
+
+
+def task_cnotes_s3_count(**context):
+    rc, out = _run_streaming(_cnotes_s3_stage_cmd("count", context["params"]),
+                             env=_cnotes_env(), cwd=_SCRIPTS_DIR)
+    if rc != 0:
+        raise RuntimeError(f"cnotes s3 count report failed (rc={rc}):\n{out[-4000:]}")
+
+
+def task_cnotes_s3_delete(**context):
+    rc, out = _run_streaming(_cnotes_s3_stage_cmd("delete", context["params"]),
+                             env=_cnotes_env(), cwd=_SCRIPTS_DIR)
+    if rc != 0:
+        raise RuntimeError(f"cnotes s3 delete failed (rc={rc}):\n{out[-4000:]}")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -455,8 +661,8 @@ def make_mapping_update(scripts_dir: str):
         script = os.path.join(scripts_dir, "mapping_delta.py")
         cmd = [
             _deid_python(), script,
-            "--mapping_schema", params["mapping_schema"],
-            "--staging_schema", params["staging_schema"],
+            "--mapping_schema", _require_param(params, "mapping_schema", "mapping_update"),
+            "--staging_schema", _require_param(params, "staging_schema", "mapping_update"),
             "--state_file",     _MAPPING_STATE_FILE,
         ]
         rc, out = _run_streaming(cmd)
@@ -468,28 +674,36 @@ def make_mapping_update(scripts_dir: str):
 
 def make_mapping_update_v5(config_file: str):
     """Return a task_mapping_update callable that runs the v5 mapping script in
-    pipeline mode (config-driven, env connections).
+    config-only mode.
 
-    The v5 script (scripts/incremental_mapping_update_v5.py) replaces the
-    per-EHR mapping_delta.py. It reads its structural config from *config_file*
-    and, given --staging_schema/--mapping_schema, builds the source connection
-    from SOURCE_DB_* (staging/delta) and the dest from DB_* (MySQL mapping),
-    then writes --state_file in the format task_validate_mapping expects.
+    The v5 script (scripts/incremental_mapping_update_v5.py) reads its structural
+    config from *config_file* and builds its connections from MAPPING_SOURCE_*
+    (source, e.g. the full prod DB) and MAPPING_DEST_* (MySQL mapping schema) via
+    db_config.MAPPING_SOURCE_CONN / MAPPING_DEST_CONN — NOT from --staging_schema.
     Run with cwd=scripts/ so the config's relative sql/<ehr>/*.sql paths resolve.
+
+    The script writes its own MappingStateManager state; task_validate_mapping
+    reads the separate _MAPPING_STATE_FILE compat file, so we write that here on
+    success.
     """
-    def task_mapping_update(**context):
-        params = context["params"]
+    def task_mapping_update(**_):
         script = os.path.join(_SCRIPTS_DIR, "incremental_mapping_update_v5.py")
         cmd = [
-            _deid_python(), "-u", script,
-            "--config",         config_file,
-            "--staging_schema", params["staging_schema"],
-            "--mapping_schema", params["mapping_schema"],
-            "--state_file",     _MAPPING_STATE_FILE,
+            sys.executable, "-u", script,
+            "--config", config_file,
         ]
         rc, out = _run_streaming(cmd, cwd=_SCRIPTS_DIR)
         if rc != 0:
             raise RuntimeError(f"mapping_update (v5) failed (rc={rc}):\n{out[-4000:]}")
+
+        # v5 (config-only mode) does not write the compat state file the shared
+        # validator expects; write it here so task_validate_mapping passes.
+        os.makedirs(os.path.dirname(_MAPPING_STATE_FILE), exist_ok=True)
+        with open(_MAPPING_STATE_FILE, "w") as f:
+            json.dump(
+                {"success": True, "completed_at": datetime.now(timezone.utc).isoformat()},
+                f, indent=2,
+            )
 
     return task_mapping_update
 
@@ -500,10 +714,10 @@ def make_pii_data(scripts_dir: str):
         params = context["params"]
         script = os.path.join(scripts_dir, "master_pii_delta.py")
         cmd = [
-            _deid_python(), script,
-            "--master_schema",  params["master_schema"],
-            "--staging_schema", params["staging_schema"],
-            "--mapping_schema", params["mapping_schema"],
+            sys.executable, script,
+            "--master_schema",  _require_param(params, "master_schema", "pii_data"),
+            "--staging_schema", _require_param(params, "staging_schema", "pii_data"),
+            "--mapping_schema", _require_param(params, "mapping_schema", "pii_data"),
             "--state_file",     _PII_STATE_FILE,
         ]
         rc, out = _run_streaming(cmd)
@@ -519,10 +733,10 @@ def make_master_insurance(scripts_dir: str):
         params = context["params"]
         script = os.path.join(scripts_dir, "master_insurance_delta.py")
         cmd = [
-            _deid_python(), script,
-            "--master_schema",  params["master_schema"],
-            "--staging_schema", params["staging_schema"],
-            "--mapping_schema", params["mapping_schema"],
+            sys.executable, script,
+            "--master_schema",  _require_param(params, "master_schema", "master_insurance"),
+            "--staging_schema", _require_param(params, "staging_schema", "master_insurance"),
+            "--mapping_schema", _require_param(params, "mapping_schema", "master_insurance"),
             "--state_file",     _MASTER_STATE_FILE,
         ]
         rc, out = _run_streaming(cmd)

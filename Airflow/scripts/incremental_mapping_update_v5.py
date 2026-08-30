@@ -899,105 +899,16 @@ def run_etl(config, source_conn_params, mysql_conn_params, dry_run=False):
         mysql_conn.close()
 
 
-# ─── Connection helpers (pipeline mode) ───────────────────────────────────────
-
-def build_env_conns(source_type, staging_schema, mapping_schema):
-    """
-    Build source/dest connection dicts from the repo's standard env scheme
-    (SOURCE_DB_* = read side, DB_* = MySQL write side), so the eCW/Greenway
-    pipelines can drive v5 the same way they drove mapping_delta.py — no
-    dedicated MAPPING_SOURCE_* / MAPPING_DEST_* vars required.
-
-      source: SOURCE_DB_* + staging_schema (dialect follows config source_type)
-      dest:   DB_*        + mapping_schema (always MySQL)
-    """
-    src_port_default = "1433" if source_type == "mssql" else "3306"
-    source_conn = {
-        "host":     os.environ.get("SOURCE_DB_HOST") or os.environ.get("DB_HOST", "localhost"),
-        "port":     int(os.environ.get("SOURCE_DB_PORT", src_port_default)),
-        "database": staging_schema,
-        "user":     os.environ.get("SOURCE_DB_USER", ""),
-        "password": os.environ.get("SOURCE_DB_PASS", ""),
-    }
-    dest_conn = {
-        "host":     os.environ.get("DB_HOST", "localhost"),
-        "port":     int(os.environ.get("DB_PORT", "3306")),
-        "database": mapping_schema,
-        "user":     os.environ.get("DB_USER", ""),
-        "password": os.environ.get("DB_PASS", ""),
-    }
-    return source_conn, dest_conn
-
-
-def write_compat_state(path, success, error=None):
-    """
-    Write a state file in the format the shared pipeline validator
-    (shared.tasks.task_validate_mapping) expects: `success` + `completed_at`
-    (an ISO timestamp checked against today). This is separate from v5's own
-    MappingStateManager state and is only written in pipeline mode.
-    """
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    payload = {"success": bool(success), "completed_at": datetime.now(timezone.utc).isoformat()}
-    if error:
-        payload["error"] = error
-    with open(path, "w") as f:
-        json.dump(payload, f, indent=2)
-
-
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description="V5 Incremental Mapping Update")
     parser.add_argument("--config", required=True, help="Path to YAML mapping config file")
     parser.add_argument("--dry-run", action="store_true", help="Log actions without writing to DB")
-    # Pipeline mode (eCW / Greenway): pass both schemas to drive connections from
-    # the standard SOURCE_DB_* / DB_* env vars instead of the legacy
-    # MAPPING_SOURCE_* / MAPPING_DEST_* vars.
-    parser.add_argument("--staging_schema", default="", help="Source (staging/delta) schema; enables pipeline mode")
-    parser.add_argument("--mapping_schema", default="", help="Destination MySQL mapping schema; enables pipeline mode")
-    parser.add_argument("--state_file", default="", help="Optional state file for the shared pipeline validator")
     args = parser.parse_args()
 
     config = load_config(args.config)
 
-    pipeline_mode = bool(args.staging_schema and args.mapping_schema)
-
-    # ── Pipeline mode: env-driven connections (eCW / Greenway) ─────────────────
-    if pipeline_mode:
-        state_dir = os.path.join(os.environ.get("STATE_DIR", "."), "mapping_master_v5")
-        setup_logging(state_dir)
-
-        # In pipeline mode the staging dialect is a per-deployment concern, so it
-        # comes from SOURCE_DB_TYPE in .env (a single edit) — NOT from the YAML.
-        # This overrides any source_type the config may carry.
-        source_type = os.environ.get("SOURCE_DB_TYPE", "mysql").lower()
-        if source_type not in ("mssql", "mysql"):
-            raise ValueError(f"SOURCE_DB_TYPE must be 'mysql' or 'mssql', got: '{source_type}'")
-        config["source_type"] = source_type
-
-        source_conn, dest_conn = build_env_conns(
-            source_type, args.staging_schema, args.mapping_schema
-        )
-        logging.info(
-            "Starting V5 Mapping Update ETL (pipeline mode): source=%s:%s/%s (%s, from SOURCE_DB_TYPE), dest=%s/%s",
-            source_conn["host"], source_conn["port"], args.staging_schema,
-            source_type, dest_conn["host"], args.mapping_schema,
-        )
-
-        try:
-            result = run_etl(config, source_conn, dest_conn, args.dry_run)
-        except Exception as e:
-            logging.exception("V5 Mapping Update failed")
-            if args.state_file and not args.dry_run:
-                write_compat_state(args.state_file, success=False, error=str(e))
-            raise
-
-        logging.info(f"V5 Mapping Update completed: {result}")
-        if args.state_file and not args.dry_run:
-            write_compat_state(args.state_file, success=True)
-        return
-
-    # ── Legacy config-only mode (mapping_master_v5_runner, veradigm/athena) ────
     from db_config import STATE_DIR, MAPPING_SOURCE_CONN, MAPPING_DEST_CONN
 
     state_dir = os.path.join(STATE_DIR, "mapping_master_v5")

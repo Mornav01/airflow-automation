@@ -76,11 +76,11 @@ class StateManager:
     def load(self, table):
         path = self._file_path(table)
         if not os.path.exists(path):
-            return {"diff": {}, "merge": {}, "deidentification": {}}
+            return {"deidentification": {}}
         with open(path, "r") as f:
             state = json.load(f)
-        state.setdefault("diff", {})
-        state.setdefault("merge", {})
+        # Own only the deidentification key; preserve everything else already in
+        # the file (e.g. STAGE-1's 'diff_merge').
         state.setdefault("deidentification", {})
         return state
 
@@ -188,7 +188,7 @@ def main():
     pk_map = load_pk_map(args.pk_csv)
 
     with open(args.tables_filepath, newline="") as f:
-        tables = [row[0].strip() for row in csv.reader(f)]
+        tables = [row[0].strip() for row in csv.reader(f) if row and row[0].strip()]
 
     logging.info("Running deidentified merge for %d tables with max_workers=%d",
                  len(tables), args.max_workers)

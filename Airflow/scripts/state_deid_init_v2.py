@@ -5,15 +5,17 @@ DAG 1 (v2) — Task 3: Deidentification State Init
 Runs BEFORE `deid run` to initialize the JSON state files for each table.
 Equivalent to the state-writing portion of state_deidentification_run_polar.py.
 
-For each table in the CSV:
-  - Reset deidentification section in JSON state file:
+For each table in the CSV, init is CONDITIONAL (resumable per-table cycle):
+  - Reset the deidentification section UNLESS the previous cycle is stuck
+    between merge and delete, i.e. skip only when:
+        deidentification_status == "success" AND is_merged AND NOT is_deleted
+  - On reset:
       deidentification_status: "started"
-      last_processed_date:     today
+      last_processed_datetime: now (full ISO timestamp)
       is_merged:               False
       is_deleted:              False
-
-This ensures the merge and delete steps (which read these JSON files) always
-see a fresh state for the current run, regardless of what previous runs wrote.
+  - Otherwise (merged but not yet deleted) LEAVE the block untouched so the
+    delete step can resume the in-progress cycle on the next run.
 """
 
 from __future__ import annotations
@@ -70,11 +72,11 @@ class StateManager:
     def load(self, table: str) -> dict:
         path = self._file_path(table)
         if not os.path.exists(path):
-            return {"diff": {}, "merge": {}, "deidentification": {}}
+            return {"deidentification": {}}
         with open(path) as f:
             state = json.load(f)
-        state.setdefault("diff", {})
-        state.setdefault("merge", {})
+        # Own only the deidentification key; preserve everything else already in
+        # the file (e.g. STAGE-1's 'diff_merge').
         state.setdefault("deidentification", {})
         return state
 
@@ -88,11 +90,34 @@ class StateManager:
 # ===================== CORE LOGIC ===========================
 # ============================================================
 
+def _should_init(deid: dict) -> bool:
+    """Init unless the previous cycle is stuck between merge and delete.
+
+    Run when: status != 'success'  (fresh / started / retry), OR
+              status == 'success' AND NOT (is_merged AND NOT is_deleted).
+    Skip only when: status == 'success' AND is_merged AND NOT is_deleted —
+    merged but not yet deleted, so the delete step can resume it.
+    """
+    if deid.get("deidentification_status") != "success":
+        return True
+    is_merged  = bool(deid.get("is_merged"))
+    is_deleted = bool(deid.get("is_deleted"))
+    return not (is_merged and not is_deleted)
+
+
 def init_table_state(table_name: str, state_manager: StateManager):
     state = state_manager.load(table_name)
+    deid  = state.get("deidentification", {})
+
+    if not _should_init(deid):
+        logging.info(
+            "[%s] mid-cycle (status=success, is_merged=%s, is_deleted=%s) → leaving state as-is",
+            table_name, deid.get("is_merged"), deid.get("is_deleted"),
+        )
+        return
 
     state["deidentification"] = {
-        "last_processed_date": datetime.now().date().isoformat(),
+        "last_processed_datetime": datetime.now().isoformat(),
         "deidentification_status": "started",
         "is_merged": False,
         "is_deleted": False,

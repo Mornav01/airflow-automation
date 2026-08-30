@@ -5,7 +5,7 @@ import csv
 import argparse
 import logging
 import concurrent.futures
-from datetime import date
+from datetime import date, datetime
 import traceback
 
 from db_config import (
@@ -58,11 +58,12 @@ class StateManager:
     def load(self, table):
         path = self._file_path(table)
         if not os.path.exists(path):
-            return {"diff": {}, "merge": {}}
+            return {"diff_merge": {}}
         with open(path, "r") as f:
             state = json.load(f)
-        state.setdefault("diff", {})
-        state.setdefault("merge", {})
+        # Single STAGE-1 key. Preserve every other key already in the file
+        # (e.g. 'deidentification' from STAGE 4, and any vestigial 'diff'/'merge').
+        state.setdefault("diff_merge", {})
         return state
 
     def save(self, table, state):
@@ -74,62 +75,43 @@ class StateManager:
 # ===================== SKIP LOGIC ===========================
 # ============================================================
 
-class SkipLogic:
+def _now_iso():
+    """Host-local ISO timestamp, second precision (same clock as STAGE-4)."""
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def _date_of(dt_iso):
+    """DATE part (YYYY-MM-DD) of an ISO datetime string, or None."""
+    return str(dt_iso)[:10] if dt_iso else None
+
+
+def should_run_init(dm, today):
+    """Init resets the diff_merge key ONLY when the previous cycle is not mid-flight.
+
+    RUN  : empty/new; OR extraction_status != 'success' (started/retry); OR
+           (success AND is_merged AND date(extraction_datetime) < today)  → new cycle.
+    SKIP : success AND not is_merged            → resume merge; OR
+           success AND is_merged AND date == today → already done today.
+    (Daily gate compares the DATE part of extraction_datetime, not the full datetime.)
     """
-    All skip rules are centralized here.
-    Modify here in future if needed.
-    """
+    status = dm.get("extraction_status")
+    if not status:
+        return True, "new/empty diff_merge → init"
+    if status != "success":
+        return True, "extraction_status != success → re-init (refresh)"
+    if not dm.get("is_merged", False):
+        return False, "success + not merged → skip init (resume merge)"
+    if _date_of(dm.get("extraction_datetime")) == today:
+        return False, "success + merged + today → skip init"
+    return True, "success + merged + older day → new cycle init"
 
-    def __init__(self, today):
-        self.today = today
 
-    def should_run_diff(self, state):
-        diff = state.get("diff", {})
-        merge = state.get("merge", {})
+def should_run_diff(dm):
+    return dm.get("extraction_status") == "started"
 
-        diff_date = diff.get("last_processed_date")
-        diff_success = diff.get("success")
 
-        merge_date = merge.get("last_processed_date")
-        merge_success = merge.get("success")
-
-        # RULE 1: If diff already successful today → skip
-        if diff_date == self.today and diff_success:
-            return False, "Diff already successful today"
-
-        # RULE 2: If diff old success AND merge old failure → skip diff
-        if (
-            diff_success
-            and diff_date != self.today
-            and merge_date != self.today
-            and merge_success is False
-        ):
-            return False, "Waiting for merge to succeed before re-running diff"
-
-        # RULE 3: If both diff + merge old success → run diff
-        if diff_success and merge_success:
-            return True, "Re-running diff as both old runs were successful"
-
-        return True, "Diff needs execution"
-
-    def should_run_merge(self, state):
-        diff = state.get("diff", {})
-        merge = state.get("merge", {})
-
-        merge_date = merge.get("last_processed_date")
-        merge_success = merge.get("success")
-
-        diff_success = diff.get("success")
-
-        # RULE 1: Merge already successful today → skip
-        if merge_date == self.today and merge_success:
-            return False, "Merge already successful today"
-
-        # RULE 2: Diff not successful → skip merge
-        if not diff_success:
-            return False, "Diff not successful — cannot run merge"
-
-        return True, "Merge needs execution"
+def should_run_merge(dm):
+    return dm.get("extraction_status") == "success" and not dm.get("is_merged", False)
 
 # ============================================================
 # ===================== CORE EXECUTION =======================
@@ -193,43 +175,61 @@ def run_merge_step(table, pk_cols, merge_engine):
 # ========== SINGLE TABLE PIPELINE (DIFF + MERGE) ===========
 # ============================================================
 
-def run_table_pipeline(table, pk_cols, state_manager, skip_logic, merge_engine):
-
+def run_table_pipeline(table, pk_cols, state_manager, merge_engine, today):
+    """Folded per-table STAGE-1 flow on the single `diff_merge` key:
+    init-gate → diff-gate → merge-gate."""
     logging.info(f"Processing table: {table}")
 
     state = state_manager.load(table)
-    today = date.today().isoformat()
+    dm = state.get("diff_merge", {})
+
+    # ------------------ INIT ------------------
+    do_init, reason = should_run_init(dm, today)
+    logging.info(f"[{table}] Init Decision: {reason}")
+    if do_init:
+        dm = {
+            "table": table,
+            "extraction_datetime": _now_iso(),
+            "extraction_status": "started",
+            "is_merged": False,
+            "extraction_Message": None,
+            "merge_Message": None,
+        }
+        state["diff_merge"] = dm
+        state_manager.save(table, state)
 
     # ------------------ DIFF ------------------
-    run_diff, reason = skip_logic.should_run_diff(state)
-    logging.info(f"Diff Decision: {reason}")
-
-    if run_diff:
+    if should_run_diff(dm):
+        logging.info(f"[{table}] Running diff (extraction_status=started)")
         diff_result = run_diff_step(table)
-        state["diff"] = {
-            "last_processed_date": today,
-            **diff_result
-        }
+        if diff_result.get("success"):
+            dm["extraction_datetime"] = _now_iso()
+            dm["extraction_status"]   = "success"
+            dm["extraction_Message"]  = diff_result.get("message")
+        else:
+            # keep extraction_status='started' so it retries next run
+            dm["extraction_Message"] = diff_result.get("error")
+        state["diff_merge"] = dm
         state_manager.save(table, state)
     else:
-        logging.info(f"Skipping diff for {table}")
-
-    # Reload state after diff
-    state = state_manager.load(table)
+        logging.info(f"[{table}] Skipping diff (extraction_status={dm.get('extraction_status')})")
 
     # ------------------ MERGE ------------------
-    run_merge, reason = skip_logic.should_run_merge(state)
-    logging.info(f"Merge Decision: {reason}")
-
-    if run_merge:
+    if should_run_merge(dm):
+        logging.info(f"[{table}] Running merge (success & not merged)")
         merge_result = run_merge_step(table, pk_cols, merge_engine)
-        state["merge"] = {
-            "last_processed_date": today,
-            **merge_result
-        }
+        if merge_result.get("success"):
+            dm["is_merged"]     = True
+            dm["merge_Message"] = merge_result.get("message")
+        else:
+            dm["merge_Message"] = merge_result.get("error")
+        state["diff_merge"] = dm
         state_manager.save(table, state)
     else:
-        logging.info(f"Skipping merge for {table}")
+        logging.info(
+            f"[{table}] Skipping merge "
+            f"(extraction_status={dm.get('extraction_status')}, is_merged={dm.get('is_merged')})"
+        )
 
 # ============================================================
 # ===================== LOOP ALL TABLES ======================
@@ -255,7 +255,7 @@ def run_all_tables(table_csv, pk_csv, max_workers=8):
             )
 
     state_manager = StateManager(STATE_DIRECTORY)
-    skip_logic    = SkipLogic(date.today().isoformat())
+    today         = date.today().isoformat()
 
     from merge_engine import MergeEngine
     merge_engine = MergeEngine(
@@ -270,7 +270,7 @@ def run_all_tables(table_csv, pk_csv, max_workers=8):
         if table not in pk_map:
             logging.warning(f"No PK found for {table}. Skipping.")
             return
-        run_table_pipeline(table, pk_map[table], state_manager, skip_logic, merge_engine)
+        run_table_pipeline(table, pk_map[table], state_manager, merge_engine, today)
 
     logging.info(f"Processing {len(tables)} tables with max_workers={max_workers}")
 
@@ -296,13 +296,13 @@ def generate_summary(table_csv, state_dir):
         "total_tables": 0,
         "diff_success_today": 0,
         "diff_failed_today": 0,
+        "diff_failed_tables": [],
         "merge_success_today": 0,
         "merge_failed_today": 0,
+        "merge_failed_tables": [],
         "skipped_today": 0,
-        "decryption_success_today": 0,
-        "decryption_failed_today": 0,
-        "decryption_skipped": 0,
-        "details": []
+        "skipped_tables": [],
+        "fully_completed_tables": [],
     }
 
     with open(table_csv, newline="") as f:
@@ -314,43 +314,30 @@ def generate_summary(table_csv, state_dir):
 
         state = state_manager.load(table)
 
-        diff = state.get("diff", {})
-        merge = state.get("merge", {})
-
-        diff_date = diff.get("last_processed_date")
-        diff_success = diff.get("success")
-
-        merge_date = merge.get("last_processed_date")
-        merge_success = merge.get("success")
+        dm = state.get("diff_merge", {})
+        status    = dm.get("extraction_status")
+        is_merged = dm.get("is_merged", False)
+        ext_date  = _date_of(dm.get("extraction_datetime"))
 
         summary["total_tables"] += 1
 
-        if diff_date == today:
-            if diff_success:
+        if ext_date == today:
+            # Extraction bucket (no terminal 'failed' status → not-success = failed)
+            if status == "success":
                 summary["diff_success_today"] += 1
+                # Merge bucket only meaningful once extraction succeeded
+                if is_merged:
+                    summary["merge_success_today"] += 1
+                    summary["fully_completed_tables"].append(table)
+                else:
+                    summary["merge_failed_today"] += 1
+                    summary["merge_failed_tables"].append(table)
             else:
                 summary["diff_failed_today"] += 1
-
-        if merge_date == today:
-            if merge_success:
-                summary["merge_success_today"] += 1
-            else:
-                summary["merge_failed_today"] += 1
-
-        if diff_date != today and merge_date != today:
+                summary["diff_failed_tables"].append(table)
+        else:
             summary["skipped_today"] += 1
-
-        decryption = state.get("diff_decryption")
-        if decryption is not None:
-            dec_date   = decryption.get("last_processed_date")
-            dec_status = decryption.get("status")
-            if dec_date == today:
-                if dec_status == "success":
-                    summary["decryption_success_today"] += 1
-                else:
-                    summary["decryption_failed_today"] += 1
-            else:
-                summary["decryption_skipped"] += 1
+            summary["skipped_tables"].append(table)
 
     return summary
 

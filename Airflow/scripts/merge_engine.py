@@ -10,7 +10,7 @@ import pandas as pd
 BATCH_INSERT_CHUNK = 1000
 DEACTIVATE_CHUNK   = 5000
 
-_NULL_LIKE_STRINGS = ["0000-00-00 00:00:00", "0000-00-00", "NaT", "nat", "NaN"]
+_NULL_LIKE_STRINGS = ["0000-00-00 00:00:00", "0000-00-00", "NaT", "nat"]
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -176,17 +176,26 @@ def _deactivate_mysql(engine: Engine, db: str, table: str,
             ) ENGINE=MEMORY
         """)
 
+        # Deactivate one chunk at a time and empty the temp table between
+        # chunks, so its peak size stays bounded by `chunk` PK rows instead
+        # of growing with the full table — no ceiling to raise regardless
+        # of how large `pk_df` gets.
+        deactivated = 0
         for i in range(0, total, chunk):
             batch_rows = rows[i:i + chunk]
             cur.executemany(ins_sql, batch_rows)
 
-        cur.execute(f"""
-            UPDATE `{db}`.`{table}` m
-            JOIN `{tmp}` t ON {join_cond}
-            SET m.nd_ActiveFlag = 'N'
-            WHERE m.nd_ActiveFlag = 'Y'
-        """)
-        logging.info("[_deactivate_mysql] [%s] deactivated %d rows", table, cur.rowcount)
+            cur.execute(f"""
+                UPDATE `{db}`.`{table}` m
+                JOIN `{tmp}` t ON {join_cond}
+                SET m.nd_ActiveFlag = 'N'
+                WHERE m.nd_ActiveFlag = 'Y'
+            """)
+            deactivated += cur.rowcount
+
+            cur.execute(f"TRUNCATE TABLE `{tmp}`")
+
+        logging.info("[_deactivate_mysql] [%s] deactivated %d rows", table, deactivated)
 
         cur.execute(f"DROP TEMPORARY TABLE `{tmp}`")
         raw.commit()
@@ -371,6 +380,7 @@ class MergeEngine:
         self._log("Step 2: prepare MAIN table")
         self._drop_primary_key(table)
         self._ensure_nd_auto_increment_main(table, pk_cols)
+        self._ensure_nd_auto_increment_unique_index(table)
         self._ensure_nd_extracted_date(table, default_date)
         self._ensure_active_flag(self.main_engine, self.main_db, table)
         if pk_cols:
@@ -407,7 +417,7 @@ class MergeEngine:
         self._log("Step 4: prepare DIFF table")
         self._ensure_nd_auto_increment_diff(table)
         self._populate_diff_nd_from_main(table, pk_cols)
-        self._ensure_active_flag(self.diff_engine, self.diff_db, table)
+        self._ensure_active_flag(self.diff_engine, self.diff_db, table, force_reset=True)
         if pk_cols:
             _ensure_active_index(self.diff_engine, self.diff_db, table, pk_cols, self.db_type)
             self._normalize_active_by_pk(self.diff_engine, self.diff_db, table, pk_cols)
@@ -647,6 +657,66 @@ class MergeEngine:
                 """))
         self._log(f"nd_auto_increment_id populated on MAIN.{table}")
 
+    def _ensure_nd_auto_increment_unique_index(self, table: str):
+        """Enforce a UNIQUE index on MAIN.nd_auto_increment_id (defense-in-depth).
+
+        Idempotent: skips if the index already exists. If the base table already
+        holds duplicate ids (from the pre-fix state logic), FAILS LOUDLY with the
+        offending ids so they can be resolved manually — rather than silently
+        letting the merge insert more duplicates. Once the index exists, any stray
+        duplicate insert (e.g. a re-merged diff) raises a clear UNIQUE violation.
+        """
+        idx_name = "ux_nd_auto_increment_id"
+
+        # 1) skip if the unique index already exists
+        with self.main_engine.connect() as conn:
+            if self.db_type == "mysql":
+                exists = conn.execute(text("""
+                    SELECT COUNT(*) FROM information_schema.statistics
+                    WHERE table_schema = :db AND table_name = :tbl AND index_name = :idx
+                """), {"db": self.main_db, "tbl": table, "idx": idx_name}).scalar()
+            else:
+                exists = conn.execute(text("""
+                    SELECT COUNT(*) FROM sys.indexes
+                    WHERE object_id = OBJECT_ID(:tbl) AND name = :idx
+                """), {"tbl": table, "idx": idx_name}).scalar()
+        if exists:
+            self._log(f"unique index {idx_name} already exists on MAIN.{table} — skipping")
+            return
+
+        # 2) detect pre-existing duplicates — fail loudly (do NOT auto-fix)
+        with self.main_engine.connect() as conn:
+            if self.db_type == "mysql":
+                dups = conn.execute(text(
+                    f"SELECT nd_auto_increment_id, COUNT(*) FROM `{self.main_db}`.`{table}` "
+                    f"WHERE nd_auto_increment_id IS NOT NULL "
+                    f"GROUP BY nd_auto_increment_id HAVING COUNT(*) > 1"
+                )).fetchall()
+            else:
+                dups = conn.execute(text(
+                    f"SELECT nd_auto_increment_id, COUNT(*) FROM {table} "
+                    f"WHERE nd_auto_increment_id IS NOT NULL "
+                    f"GROUP BY nd_auto_increment_id HAVING COUNT(*) > 1"
+                )).fetchall()
+        if dups:
+            sample = ", ".join(str(r[0]) for r in dups[:20])
+            raise Exception(
+                f"Cannot add UNIQUE index on nd_auto_increment_id for MAIN.{table} — "
+                f"{len(dups)} duplicate id(s) present (first 20: {sample}). "
+                f"Resolve the duplicates in the base table and re-run."
+            )
+
+        # 3) create the UNIQUE index
+        with self.main_engine.begin() as conn:
+            if self.db_type == "mysql":
+                conn.execute(text(
+                    f"ALTER TABLE `{self.main_db}`.`{table}` "
+                    f"ADD UNIQUE INDEX {idx_name} (nd_auto_increment_id)"
+                ))
+            else:
+                conn.execute(text(f"CREATE UNIQUE INDEX {idx_name} ON {table} (nd_auto_increment_id)"))
+        self._log(f"Created UNIQUE index {idx_name} on MAIN.{table}(nd_auto_increment_id)")
+
     def _ensure_nd_extracted_date(self, table: str, default_date: str):
         if self._column_exists(self.main_engine, self.main_db, table, "nd_extracted_date"):
             self._log(f"nd_extracted_date already exists on MAIN.{table} — skipping")
@@ -737,19 +807,39 @@ class MergeEngine:
         self._log(f"DIFF.{table} — nd_auto_increment_id populated for {null_count} rows starting from {max_nd + 1}")
 
 
-    def _ensure_active_flag(self, engine: Engine, db: str, table: str):
-        if self._column_exists(engine, db, table, "nd_ActiveFlag"):
+    def _ensure_active_flag(self, engine: Engine, db: str, table: str, force_reset: bool = False):
+        """Ensure nd_ActiveFlag exists and is 'Y' where appropriate.
+
+        force_reset=True unconditionally resets every row to 'Y' even when the
+        column already exists — used for DIFF, which only ever holds the
+        current delta batch, so every row in it should enter step 5 as 'Y'
+        (the following _normalize_active_by_pk then demotes any duplicate-PK
+        stragglers). Without this, a DIFF table that already has the column
+        from an earlier interrupted/resumed merge attempt would silently keep
+        whatever value (often NULL) its rows already carry, since nothing
+        else in the pipeline ever sets nd_ActiveFlag on DIFF.
+
+        force_reset=False (default, used for MAIN) preserves the one-time
+        add+set behavior — MAIN holds full history, so it must not be
+        blanket-reset every cycle; its per-row lifecycle is instead managed
+        incrementally via _raw_deactivate + _normalize_active_by_pk.
+        """
+        exists = self._column_exists(engine, db, table, "nd_ActiveFlag")
+        if exists and not force_reset:
             self._log(f"nd_ActiveFlag already exists on {db}.{table} — skipping")
             return
-        self._log(f"Adding nd_ActiveFlag to {db}.{table}")
+
+        self._log(f"{'Resetting' if exists else 'Adding'} nd_ActiveFlag to 'Y' on {db}.{table}")
         with engine.begin() as conn:
             if self.db_type == "mysql":
-                conn.execute(text(f"ALTER TABLE `{db}`.`{table}` ADD nd_ActiveFlag CHAR(1)"))
+                if not exists:
+                    conn.execute(text(f"ALTER TABLE `{db}`.`{table}` ADD nd_ActiveFlag CHAR(1)"))
                 conn.execute(text(f"UPDATE `{db}`.`{table}` SET nd_ActiveFlag = 'Y'"))
             else:
-                conn.execute(text(f"ALTER TABLE {table} ADD nd_ActiveFlag CHAR(1)"))
+                if not exists:
+                    conn.execute(text(f"ALTER TABLE {table} ADD nd_ActiveFlag CHAR(1)"))
                 conn.execute(text(f"UPDATE {table} SET nd_ActiveFlag = 'Y'"))
-        self._log(f"nd_ActiveFlag added and set to Y on {db}.{table}")
+        self._log(f"nd_ActiveFlag set to Y on {db}.{table}")
 
     def _normalize_active_by_pk(self, engine: Engine, db: str, table: str, pk_cols: List[str]):
         if not pk_cols:

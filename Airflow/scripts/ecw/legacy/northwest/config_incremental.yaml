@@ -39,8 +39,8 @@ config_key: incremental
 #failed_rows_db_path: /Users/ndainoran/airflow_latest/airflow-automation/deid_runtime/failed_rows.db
 # .deid_staging/ is auto-placed next to state.db (same folder)
 
-state_db_url: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/deid_state"
-failed_rows_db_url: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/deid_failed"
+state_db_name: deid_state
+failed_rows_db_name: deid_failed
 
 # ── Redis ────────────────────────────────────────────────────────────
 redis_url: redis://localhost:6379/0
@@ -91,8 +91,8 @@ qc:
 
 # ── PII / Notes Config ───────────────────────────────────────────────
 pii_db:
-  master_connection_str: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/master_pg"
-  secondary_pii_connection_str: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/master_pg"
+  master_db_name: master_pg
+  secondary_pii_db_name: master_pg
 
 secondary_pii_config_path: /Users/neurodiscoveryai/Desktop/AIR_DEID_V2/airflow-automation/Airflow/scripts/configs/northwest/northwest_secondary_pii_config.yaml
 

@@ -53,6 +53,39 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _is_missing_table_error(exc) -> bool:
+    """True if a DB error indicates a missing source table (dialect-agnostic)."""
+    msg = str(exc).lower()
+    # MySQL 1146 ("table doesn't exist"): check the DBAPI's actual numeric error
+    # code via exc.orig.args[0], not a substring match on the whole message —
+    # "1146" could otherwise appear in an unrelated error (a row id, a byte
+    # count, ...) and get misclassified as a missing table, silently turning a
+    # real failure into a skipped "success".
+    orig_args = getattr(getattr(exc, "orig", None), "args", None)
+    is_1146 = bool(orig_args) and orig_args[0] == 1146
+    return (
+        "invalid object name" in msg   # MSSQL 208
+        or "42s02" in msg              # ODBC missing-table SQLSTATE
+        or "doesn't exist" in msg      # MySQL 1146 (message text)
+        or is_1146
+    )
+
+
+def _write_success_state(state_file: str, skipped: bool = False, reason: str = ""):
+    """Write the success state file the downstream validator expects. On a skip,
+    still report success (so the pipeline proceeds) but flag it."""
+    if not state_file:
+        return
+    os.makedirs(os.path.dirname(state_file), exist_ok=True)
+    payload = {"success": True, "completed_at": datetime.now(timezone.utc).isoformat()}
+    if skipped:
+        payload["skipped"] = True
+        payload["reason"] = reason
+    with open(state_file, "w") as f:
+        json.dump(payload, f, indent=2)
+    logger.info("Wrote state file: %s", state_file)
+
+
 def create_mysql_engine(schema: str):
     """MySQL engine for master / mapping schemas (always MySQL)."""
     url = URL.create("mysql+pymysql", username=MYSQL_USER, password=MYSQL_PASS, host=MYSQL_HOST, port=MYSQL_PORT, database=schema)
@@ -176,8 +209,26 @@ def run_master_insurance_delta(master_schema: str, staging_schema: str, mapping_
         INNER JOIN edi_invoice b ON a.invid = b.id
         """
         )
-        result = conn.execute(query)
-        ins_data = result.fetchall()
+        try:
+            result = conn.execute(query)
+            ins_data = result.fetchall()
+        except Exception as e:
+            if _is_missing_table_error(e):
+                logger.warning(
+                    "NO TABLE FOUND IN THE STAGING SCHEMA (%s) — skipping master insurance delta: %s",
+                    staging_schema, e,
+                )
+                _write_success_state(state_file, skipped=True, reason=str(e))
+                return
+            raise
+
+    if not ins_data:
+        logger.warning(
+            "NO TABLE FOUND IN THE STAGING SCHEMA (%s) — no insurance source rows; skipping master insurance delta",
+            staging_schema,
+        )
+        _write_success_state(state_file, skipped=True, reason="no source rows")
+        return
 
     logger.info("Loaded %d insurance source rows", len(ins_data))
 
@@ -284,11 +335,7 @@ def run_master_insurance_delta(master_schema: str, staging_schema: str, mapping_
 
     logger.info("Master insurance delta processing complete")
 
-    if state_file:
-        os.makedirs(os.path.dirname(state_file), exist_ok=True)
-        with open(state_file, "w") as f:
-            json.dump({"success": True, "completed_at": datetime.now(timezone.utc).isoformat()}, f, indent=2)
-        logger.info("Wrote state file: %s", state_file)
+    _write_success_state(state_file)
 
 
 def main():

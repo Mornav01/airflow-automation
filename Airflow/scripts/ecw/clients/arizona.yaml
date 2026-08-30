@@ -6,6 +6,12 @@ skip_dump: true
 skip_restore: true
 stop_after_diff_merge: false
 
+# Skip toggles (also overridable per-run in the Airflow UI):
+#   skip_diff_merge — skip the diff+merge stage (deid runs on existing merged data)
+#   skip_s3_upload  — skip the S3 upload/count/delete stage
+skip_diff_merge: false
+skip_s3_upload: false
+
 diff_merge_max_workers: 16
 deid_init_max_workers: 16
 deid_status_max_workers: 8

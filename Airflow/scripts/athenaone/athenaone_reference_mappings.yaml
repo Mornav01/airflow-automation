@@ -13,7 +13,7 @@
 # SOMECHILDTABLE:
 #   source_table: SOMECHILDTABLE
 #   destination_column: PATIENTID
-#   destination_column_type: patient_id
+#   destination_column_type: PATIENT_PATIENTID
 #   conditions:
 #     - source_column: PARENTID
 #       reference_table: SOMEPARENTTABLE

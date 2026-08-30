@@ -21,6 +21,7 @@ patient:
   sql_file: sql/greenway/patient_mapping.sql
   identifier_columns:
     - patientid
+    - personid
   # nd_patient_id seed used ONLY when patient_mapping_table is empty (fresh client
   # bootstrap). On an already-populated table the next id continues from MAX+1 and
   # this value is unused. Set to the client's allocated 15-digit base when bootstrapping.

@@ -39,7 +39,7 @@ local_tz = pendulum.timezone("Asia/Kolkata")
 # Behaviour is env-driven; surface the active source in the tags and gate the
 # run with a single DUMP_SKIP flag (per-machine, no client YAML needed).
 _SOURCE_TYPE = os.environ.get("DUMP_SOURCE_TYPE", "unset").strip().lower() or "unset"
-_SCHEDULE = os.environ.get("DUMP_SCHEDULE", "0 1 * * *")  # default 01:00 Asia/Kolkata
+_SCHEDULE = os.environ.get("DUMP_SCHEDULE")  # default 01:00 Asia/Kolkata
 _SKIP_DUMP = os.environ.get("DUMP_SKIP", "").strip().lower() in ("1", "true", "yes", "on")
 
 

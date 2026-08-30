@@ -10,7 +10,7 @@ PROJECT_DIR = "/Users/ndai/Documents/udm/de_udm/dashboards"
 with DAG(
     dag_id="provider_dashboard",
     start_date=datetime(2026, 4, 9, 12, 0, tzinfo=IST),  # 12 PM IST
-    schedule="0 12 * * *",  # every day at 12:00 IST
+    schedule=None,#"0 12 * * *",  # every day at 12:00 IST
     catchup=False,
     tags=["dashboard", "mssql", "reporting"],
 ) as dag:

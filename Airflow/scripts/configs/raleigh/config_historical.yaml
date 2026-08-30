@@ -32,8 +32,8 @@ config_key: historical
 # .deid_staging/ is auto-placed next to state.db (same folder)
 
 
-state_db_url: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/deid_state"
-failed_rows_db_url: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/deid_failed"
+state_db_name: deid_state
+failed_rows_db_name: deid_failed
 
 
 # ── Redis ────────────────────────────────────────────────────────────
@@ -88,8 +88,8 @@ qc:
 
 # ── PII / Notes Config ───────────────────────────────────────────────
 pii_db:
-  master_connection_str: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/master_pg"
-  secondary_pii_connection_str: "mysql+pymysql://${DB_USER}:${DB_PASS}@localhost:3306/master_pg"
+  master_db_name: master_pg
+  secondary_pii_db_name: master_pg
 
 secondary_pii_config_path: /Users/neurodiscoveryai/Desktop/athenaone_airflow_automation/services/configs/raleigh/raleigh_secondary_pii_config.yaml
 

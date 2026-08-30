@@ -81,7 +81,7 @@ with DAG(
     dag_id="provider_dashboard",
     description="Run provider dashboard table update script",
     start_date=pendulum.datetime(2026, 4, 9, 12, 0, tz=local_tz),
-    schedule="0 12 * * *",  # every day at 12:00 IST
+    schedule=None,#"0 12 * * *",  # every day at 12:00 IST
     catchup=False,
     default_args=default_args,
     on_success_callback=on_success_callback,

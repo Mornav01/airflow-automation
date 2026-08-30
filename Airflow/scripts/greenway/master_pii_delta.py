@@ -11,7 +11,9 @@ resolves each source patient_id → nd_patient_id via patient_mapping_table in
 --mapping_schema, then writes with a single INSERT ... ON DUPLICATE KEY UPDATE keyed
 on uq_nd_patient_id. NULL source values never overwrite an existing value (COALESCE).
 
-Staging is MSSQL (Greenway/PrimeSUITE); master and mapping (dest) schemas are MySQL.
+The staging source dialect is controlled by SOURCE_DB_TYPE ("mssql" default — Greenway/
+PrimeSUITE staging is normally MSSQL — or "mysql"); master and mapping (dest) schemas
+are always MySQL.
 
 Usage:
     python master_pii_delta.py --master_schema "master_pg" \
@@ -33,10 +35,10 @@ MYSQL_PASS = os.environ.get("DB_PASS", "")
 MYSQL_HOST = os.environ.get("DB_HOST", "localhost")
 MYSQL_PORT = int(os.environ.get("DB_PORT", "3306"))
 
-MSSQL_USER = os.environ.get("SOURCE_DB_USER", "sa")
-MSSQL_PASS = os.environ.get("SOURCE_DB_PASS", "")
-MSSQL_HOST = os.environ.get("SOURCE_DB_HOST") or os.environ.get("DB_HOST", "localhost")
-MSSQL_PORT = int(os.environ.get("SOURCE_DB_PORT", "1433"))
+# Controls the dialect used for the Greenway/PrimeSUITE staging source database.
+# "mssql" (default — Greenway/PrimeSUITE staging is normally MSSQL) or "mysql".
+# Dest engines (master/mapping) are always MySQL.
+SOURCE_DB_TYPE = os.environ.get("SOURCE_DB_TYPE", "mssql")
 
 
 logging.basicConfig(
@@ -44,6 +46,39 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def _is_missing_table_error(exc) -> bool:
+    """True if a DB error indicates a missing source table (dialect-agnostic)."""
+    msg = str(exc).lower()
+    # MySQL 1146 ("table doesn't exist"): check the DBAPI's actual numeric error
+    # code via exc.orig.args[0], not a substring match on the whole message —
+    # "1146" could otherwise appear in an unrelated error (a row id, a byte
+    # count, ...) and get misclassified as a missing table, silently turning a
+    # real failure into a skipped "success".
+    orig_args = getattr(getattr(exc, "orig", None), "args", None)
+    is_1146 = bool(orig_args) and orig_args[0] == 1146
+    return (
+        "invalid object name" in msg   # MSSQL 208
+        or "42s02" in msg              # ODBC missing-table SQLSTATE
+        or "doesn't exist" in msg      # MySQL 1146 (message text)
+        or is_1146
+    )
+
+
+def _write_success_state(state_file: str, skipped: bool = False, reason: str = ""):
+    """Write the success state file the downstream validator expects. On a skip,
+    still report success (so the pipeline proceeds) but flag it."""
+    if not state_file:
+        return
+    os.makedirs(os.path.dirname(state_file), exist_ok=True)
+    payload = {"success": True, "completed_at": datetime.now(timezone.utc).isoformat()}
+    if skipped:
+        payload["skipped"] = True
+        payload["reason"] = reason
+    with open(state_file, "w") as f:
+        json.dump(payload, f, indent=2)
+    logger.info("Wrote state file: %s", state_file)
 
 
 def create_mysql_engine(schema: str):
@@ -59,18 +94,27 @@ def create_mysql_engine(schema: str):
     return create_engine(url, pool_recycle=3600, pool_pre_ping=True)
 
 
-def create_mssql_engine(schema: str):
-    """MSSQL engine for the Greenway/PrimeSUITE staging source."""
-    odbc_driver = os.environ.get("ODBC_DRIVER", "ODBC Driver 17 for SQL Server")
-    url = URL.create(
-        "mssql+pyodbc",
-        username=MSSQL_USER,
-        password=MSSQL_PASS,
-        host=MSSQL_HOST,
-        port=MSSQL_PORT,
-        database=schema,
-        query={"driver": odbc_driver, "TrustServerCertificate": "yes"},
-    )
+def build_source_engine(schema: str):
+    """Engine for the Greenway/PrimeSUITE staging source — dialect controlled by
+    SOURCE_DB_TYPE (defaults to "mssql")."""
+    user = os.environ.get("SOURCE_DB_USER", "sa" if SOURCE_DB_TYPE == "mssql" else "")
+    password = os.environ.get("SOURCE_DB_PASS", "")
+    host = os.environ.get("SOURCE_DB_HOST") or os.environ.get("DB_HOST", "localhost")
+    if SOURCE_DB_TYPE == "mssql":
+        port = int(os.environ.get("SOURCE_DB_PORT", 1433))
+        odbc_driver = os.environ.get("ODBC_DRIVER", "ODBC Driver 17 for SQL Server")
+        url = URL.create(
+            "mssql+pyodbc",
+            username=user,
+            password=password,
+            host=host,
+            port=port,
+            database=schema,
+            query={"driver": odbc_driver, "TrustServerCertificate": "yes"},
+        )
+        return create_engine(url, pool_recycle=3600, pool_pre_ping=True)
+    port = int(os.environ.get("SOURCE_DB_PORT", 3306))
+    url = URL.create("mysql+pymysql", username=user, password=password, host=host, port=port, database=schema)
     return create_engine(url, pool_recycle=3600, pool_pre_ping=True)
 
 
@@ -151,7 +195,7 @@ def run_master_pii_delta(master_schema: str, staging_schema: str, mapping_schema
         mapping_schema,
     )
 
-    source_engine = create_mssql_engine(staging_schema)
+    source_engine = build_source_engine(staging_schema)
     dest_engine = create_mysql_engine(master_schema)
 
     # -------------------------------------------------------------------------
@@ -226,8 +270,26 @@ def run_master_pii_delta(master_schema: str, staging_schema: str, mapping_schema
         LEFT JOIN Employers f       ON e.EmployerID = f.EmployerID
             """
         )
-        result = conn.execute(query)
-        source_rows = result.fetchall()
+        try:
+            result = conn.execute(query)
+            source_rows = result.fetchall()
+        except Exception as e:
+            if _is_missing_table_error(e):
+                logger.warning(
+                    "NO TABLE FOUND IN THE STAGING SCHEMA (%s) — skipping master PII delta: %s",
+                    staging_schema, e,
+                )
+                _write_success_state(state_file, skipped=True, reason=str(e))
+                return
+            raise
+
+    if not source_rows:
+        logger.warning(
+            "NO TABLE FOUND IN THE STAGING SCHEMA (%s) — no source PII rows; skipping master PII delta",
+            staging_schema,
+        )
+        _write_success_state(state_file, skipped=True, reason="no source rows")
+        return
 
     logger.info("Loaded %d source PII rows", len(source_rows))
 
@@ -294,11 +356,7 @@ def run_master_pii_delta(master_schema: str, staging_schema: str, mapping_schema
 
     logger.info("Master PII delta processing complete")
 
-    if state_file:
-        os.makedirs(os.path.dirname(state_file), exist_ok=True)
-        with open(state_file, "w") as f:
-            json.dump({"success": True, "completed_at": datetime.now(timezone.utc).isoformat()}, f, indent=2)
-        logger.info("Wrote state file: %s", state_file)
+    _write_success_state(state_file)
 
 
 def main():

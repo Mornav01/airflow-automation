@@ -1,5 +1,6 @@
 SELECT 
     p.PatientID AS patientid,
+    p.PersonID AS personid,
     acc.AcctOpenDate AS registration_date
 FROM Patient AS p
 LEFT JOIN br_Account AS acc

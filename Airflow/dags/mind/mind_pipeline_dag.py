@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 import traceback as _traceback
 from datetime import date, datetime, timedelta, timezone
 
@@ -72,6 +73,22 @@ PII_STATE_FILE     = os.path.join(MAPPING_MASTER_STATE_DIR, "pii_data_state.json
 MASTER_STATE_FILE  = os.path.join(MAPPING_MASTER_STATE_DIR, "master_insurance_state.json")
 
 _ENV = {**os.environ, "PYTHONUNBUFFERED": "1"}
+
+# cnotes sub-flow reuses the state scripts and SHARES the main STATE_DIR (no override):
+# cnotes and main table names are disjoint (no per-table JSON collision) and the flows
+# run serialized, so the S3 count report merges into one combined count_report.csv
+# instead of each flow overwriting the other at the shared S3 key.
+_CNOTES_ENV = _ENV
+
+
+# cnotes sub-flow control (mind has no client config, so these come from env):
+#   SKIP_CNOTES  → default for the skip_cnotes RUNTIME param (UI checkbox via cnotes_gate)
+#   CNOTES_FIRST → PARSE-TIME structural ordering; true = cnotes BEFORE the main deid
+def _flag(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes")
+
+
+_CNOTES_FIRST = _flag("CNOTES_FIRST")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -388,6 +405,15 @@ def task_check_continue(**context):
     return True
 
 
+def task_cnotes_gate(**context):
+    """ShortCircuit gate: skip the whole cnotes sub-flow when skip_cnotes=True."""
+    if context["params"].get("skip_cnotes", False):
+        logger.info("skip_cnotes=True — skipping cnotes sub-flow")
+        return False
+    logger.info("Running cnotes sub-flow")
+    return True
+
+
 # ── Stage 7a: Mapping Update (parallel) ──────────────────────────────────────
 def task_mapping_update(**context):
     params = context["params"]
@@ -488,7 +514,8 @@ def task_init_deid_state(**context):
 # ── Stage 10: Run deid v2 ────────────────────────────────────────────────────
 def task_run_deid(**context):
     params = context["params"]
-    script = os.path.join(_SCRIPTS_DIR, "manual_deidentification_run_v2.py")
+    # state-gated runner: skips tables already at deidentification_status='success'.
+    script = os.path.join(_SCRIPTS_DIR, "state_deidentification_run.py")
     cmd = [
         DEID_PYTHON, script,
         "--config", params["config_yaml"],
@@ -505,8 +532,10 @@ def task_run_deid(**context):
 def task_check_deid_status(**context):
     params = context["params"]
     script = os.path.join(_SCRIPTS_DIR, "state_deid_status_check_v2.py")
+    # v3 status-check uses mssql+pymssql; run under the Airflow interpreter
+    # (air_env has pymssql), not DEID_PYTHON (new_deid = deid-only).
     cmd = [
-        DEID_PYTHON, script,
+        sys.executable, script,
         "--config-yaml",     params["config_yaml"],
         "--tables-filepath", params["deid_post_process_tables_csv"],
         "--max-workers",     str(params.get("deid_status_max_workers", 8)),
@@ -542,37 +571,36 @@ def task_merge_deid_data(**context):
         )
 
 
-# ── Stage 13: S3 Transfer ────────────────────────────────────────────────────
-def task_s3_transfer(**context):
-    params = context["params"]
-    run_date = date.today().isoformat()
-
-    transfer_schema = params.get("s3_deid_schema", "deidentified_staging")
-    max_workers = params.get("parser_workers", None)
-
-    script = os.path.join(_SCRIPTS_DIR, "s3_transfer.py")
-    try:
-        date_folder = datetime.strptime(run_date, "%Y-%m-%d").strftime("%m%d%Y")
-    except ValueError:
-        raise RuntimeError(f"Invalid run_date format: {run_date}. Expected YYYY-MM-DD")
-    destination_prefix = f"EHR/{date_folder}"
-
-    cmd = [
+# ── Stage 13: S3 Transfer (STAGE 5 — state-gated upload → count → delete) ─────
+def _s3_stage_cmd(mode, params):
+    script = os.path.join(_SCRIPTS_DIR, "state_s3_transfer.py")
+    return [
         DEID_PYTHON, script,
-        "--schema",             transfer_schema,
-        "--run_date",           run_date,
-        "--destination_prefix", destination_prefix,
+        "--mode",            mode,
+        "--schema",          params.get("s3_deid_schema", "deidentified_staging"),
+        "--tables-filepath", params["deid_post_process_tables_csv"],
+        "--run_date",        date.today().isoformat(),
+        "--max-workers",     str(params.get("parser_workers") or 4),
     ]
-    if max_workers:
-        cmd.extend(["--max_workers", str(max_workers)])
-        logger.info("S3 Transfer will use %s workers", max_workers)
 
-    logger.info("Running S3 Transfer: schema=%s, run_date=%s", transfer_schema, run_date)
-    logger.debug("Command: %s", " ".join(cmd))
 
-    result = subprocess.run(cmd, check=False, cwd=os.path.dirname(script), env=_ENV)
+def _run_s3_stage(mode, context):
+    result = subprocess.run(_s3_stage_cmd(mode, context["params"]),
+                            check=False, cwd=_SCRIPTS_DIR, env=_ENV)
     if result.returncode != 0:
-        raise RuntimeError(f"s3_transfer failed (rc={result.returncode})")
+        raise RuntimeError(f"s3 {mode} failed (rc={result.returncode})")
+
+
+def task_s3_upload(**context):
+    _run_s3_stage("upload", context)
+
+
+def task_s3_count(**context):
+    _run_s3_stage("count", context)
+
+
+def task_s3_delete(**context):
+    _run_s3_stage("delete", context)
 
 
 # ── Stage 14: Delete processed diff rows (trigger_rule=ALL_DONE) ─────────────
@@ -593,6 +621,107 @@ def task_delete_diffmerged(**context):
         raise RuntimeError(
             f"delete_diffmerged failed (rc={result.returncode}):\n{result.stderr or result.stdout}"
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# cnotes sub-flow — deid lifecycle for clinical notes.
+# Reuses the SAME state scripts (init / status / merge / s3) scoped to the
+# clinicalbin tables CSV + config, sharing the main STATE_DIR via _CNOTES_ENV
+# (no override; disjoint table names). clinicalbin_deid / decrypt_cnotes are the
+# existing tasks above.
+# ══════════════════════════════════════════════════════════════════════════════
+def task_cnotes_init(**context):
+    params = context["params"]
+    script = os.path.join(_SCRIPTS_DIR, "state_deid_init_v2.py")
+    cmd = [
+        DEID_PYTHON, script,
+        "--tables-filepath", params["clinicalbin_tables_csv"],
+        "--max-workers",     str(params.get("deid_init_max_workers", 16)),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, env=_CNOTES_ENV)
+    if result.stdout:
+        logger.info(result.stdout)
+    if result.stderr:
+        logger.info(result.stderr)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"cnotes deid state init failed (rc={result.returncode}):\n{result.stderr or result.stdout}"
+        )
+
+
+def task_cnotes_status(**context):
+    params = context["params"]
+    script = os.path.join(_SCRIPTS_DIR, "state_deid_status_check_v2.py")
+    # status-check uses mssql+pymssql; run under the Airflow interpreter (air_env).
+    cmd = [
+        sys.executable, script,
+        "--config-yaml",     params["clinicalbin_deid_config"],
+        "--tables-filepath", params["clinicalbin_tables_csv"],
+        "--max-workers",     str(params.get("deid_status_max_workers", 8)),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, env=_CNOTES_ENV)
+    if result.stdout:
+        logger.info(result.stdout)
+    if result.stderr:
+        logger.info(result.stderr)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"cnotes deid status check failed (rc={result.returncode}):\n{result.stderr or result.stdout}"
+        )
+
+
+def task_cnotes_merge(**context):
+    params = context["params"]
+    script = os.path.join(_SCRIPTS_DIR, "state_deid_merge.py")
+    cmd = [
+        DEID_PYTHON, script,
+        "--tables_filepath", params["clinicalbin_tables_csv"],
+        "--max_workers",     str(params.get("deid_merge_max_workers", 8)),
+    ]
+    # Cnotes table PKs default to PK_CSV (db_config); pass a cnotes-specific PK CSV
+    # only if one is configured.
+    if params.get("cnotes_pk_csv"):
+        cmd += ["--pk_csv", params["cnotes_pk_csv"]]
+    result = subprocess.run(cmd, capture_output=True, text=True, env=_CNOTES_ENV)
+    if result.stdout:
+        logger.info(result.stdout)
+    if result.stderr:
+        logger.info(result.stderr)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"cnotes deid merge failed (rc={result.returncode}):\n{result.stderr or result.stdout}"
+        )
+
+
+def _cnotes_s3_stage_cmd(mode, params):
+    script = os.path.join(_SCRIPTS_DIR, "state_s3_transfer.py")
+    return [
+        DEID_PYTHON, script,
+        "--mode",            mode,
+        "--schema",          params.get("s3_deid_schema", "deidentified_staging"),
+        "--tables-filepath", params["clinicalbin_tables_csv"],
+        "--run_date",        date.today().isoformat(),
+        "--max-workers",     str(params.get("parser_workers") or 4),
+    ]
+
+
+def _run_cnotes_s3_stage(mode, context):
+    result = subprocess.run(_cnotes_s3_stage_cmd(mode, context["params"]),
+                            check=False, cwd=_SCRIPTS_DIR, env=_CNOTES_ENV)
+    if result.returncode != 0:
+        raise RuntimeError(f"cnotes s3 {mode} failed (rc={result.returncode})")
+
+
+def task_cnotes_s3_upload(**context):
+    _run_cnotes_s3_stage("upload", context)
+
+
+def task_cnotes_s3_count(**context):
+    _run_cnotes_s3_stage("count", context)
+
+
+def task_cnotes_s3_delete(**context):
+    _run_cnotes_s3_stage("delete", context)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -622,8 +751,13 @@ with DAG(
         # Clinicalbin deid (separate deid run for MySQL clinicalbin delta)
         "clinicalbin_deid_config": os.path.join(_CONFIGS_DIR, "mind_config_clinicalbin.yaml"),
         "clinicalbin_tables_csv":  os.environ.get("CLINICALBIN_TABLES_CSV", ""),
+        # cnotes merge PK CSV — empty falls back to PK_CSV (db_config) in the merge step
+        "cnotes_pk_csv":           os.environ.get("CNOTES_PK_CSV", ""),
+        # skip_cnotes — runtime UI checkbox (default from env SKIP_CNOTES);
+        # the cnotes_gate ShortCircuit skips the whole cnotes chain when true.
+        "skip_cnotes":             _flag("SKIP_CNOTES"),
         # S3 Transfer
-        "s3_deid_schema": os.environ.get("DEID_STAGING_NAME", "deidentified_staging"),
+        "s3_deid_schema": os.environ.get("DEID_MERGED_NAME", "deidentified_mobiledoc_diff_merged"),
         "parser_workers":  None,
         # Control / parallelism
         "skip_restore":           False,
@@ -644,17 +778,6 @@ with DAG(
     restore = PythonOperator(
         task_id="restore",
         python_callable=task_restore,
-    )
-
-    decrypt_cnotes = PythonOperator(
-        task_id="decrypt_cnotes",
-        python_callable=task_decrypt_cnotes,
-    )
-
-    clinicalbin_deid = PythonOperator(
-        task_id="clinicalbin_deid",
-        python_callable=task_clinicalbin_deid,
-        execution_timeout=None,
     )
 
     # ── MSSQL diff+merge branch ───────────────────────────────────────────────
@@ -699,6 +822,10 @@ with DAG(
     init_deid_state = PythonOperator(
         task_id="init_deid_state",
         python_callable=task_init_deid_state,
+        # In cnotes-first mode the cnotes tail feeds this task; tolerate a skipped
+        # (not failed) cnotes chain so a runtime skip_cnotes still lets deid proceed.
+        trigger_rule=(TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS if _CNOTES_FIRST
+                      else TriggerRule.ALL_SUCCESS),
     )
 
     run_deid = PythonOperator(
@@ -712,17 +839,26 @@ with DAG(
         python_callable=task_check_deid_status,
     )
 
-    # merge_deid and s3_transfer run in parallel once both deid branches complete
+    # Post-deid runs sequentially: merge → delete original → STAGE 5 (s3 upload → count → delete)
     merge_deid_data = PythonOperator(
         task_id="merge_deid_data",
         python_callable=task_merge_deid_data,
         trigger_rule=TriggerRule.ALL_DONE,
     )
 
-    s3_transfer = PythonOperator(
-        task_id="s3_transfer",
-        python_callable=task_s3_transfer,
-        trigger_rule=TriggerRule.ALL_DONE,
+    s3_upload = PythonOperator(
+        task_id="s3_upload",
+        python_callable=task_s3_upload,
+    )
+
+    s3_count = PythonOperator(
+        task_id="s3_count",
+        python_callable=task_s3_count,
+    )
+
+    s3_delete = PythonOperator(
+        task_id="s3_delete",
+        python_callable=task_s3_delete,
     )
 
     delete_original_diffmerged = PythonOperator(
@@ -731,28 +867,78 @@ with DAG(
         trigger_rule=TriggerRule.ALL_DONE,
     )
 
-    # ── Pipeline ───────────────────────────────────────────────────────────────
-    # Stage 1-2: linear start
+    # ── Main pipeline ────────────────────────────────────────────────────────
     # Verify the DBs are free before restore flips them into RESTORING/standby mode,
     # then apply the logs dumped by the separate daily-dump DAG.
-    check_db_availability >> restore >> decrypt_cnotes
+    check_db_availability >> restore >> run_diff_merge
 
-    # diff+merge starts in parallel with clinicalbin deid setup after decrypt+staging
-    decrypt_cnotes >> run_diff_merge
-
-    # Branch B — MSSQL: diff+merge → validate → checkpoint → parallel mapping/master update
+    # MSSQL: diff+merge → validate → checkpoint → parallel mapping/master update
     run_diff_merge >> validate_diff_merge >> check_continue >> [mapping_update, pii_data, master_insurance]
     [mapping_update, pii_data, master_insurance] >> validate_mapping
 
-    # clinicalbin deid starts once decrypt+staging AND mapping/master tables are ready
-    [decrypt_cnotes, validate_mapping] >> clinicalbin_deid
-
-    # validate mapping → init deid state → run deid → status check
+    # validate mapping → init deid state → run deid → status check →
+    # merge → trim original diff-merged → STAGE 5: s3 upload → count → delete.
     validate_mapping >> init_deid_state >> run_deid >> check_deid_status
+    check_deid_status >> merge_deid_data >> delete_original_diffmerged >> s3_upload >> s3_count >> s3_delete
 
-    # Both deid branches must fully complete before merge+transfer start (in parallel)
-    [clinicalbin_deid, check_deid_status] >> merge_deid_data
-    [clinicalbin_deid, check_deid_status] >> s3_transfer
+    # ── cnotes sub-flow (shares the main STATE_DIR; disjoint table names) ───────
+    # Always present in the graph; a ShortCircuit gate (cnotes_gate) skips the whole
+    # chain at runtime when skip_cnotes=True (a UI checkbox, default from env). Chain:
+    #   gate → decrypt → init → clinicalbin deid → status → merge → s3 upload/count/delete
+    # Runs AFTER the main pipeline by default; cnotes_first (parse-time) moves it
+    # before the main deid (still after mapping, which its deid needs).
+    cnotes_gate = ShortCircuitOperator(
+        task_id="cnotes_gate",
+        python_callable=task_cnotes_gate,
+        # Don't force-skip past trigger-rule boundaries (init_deid_state in first mode).
+        ignore_downstream_trigger_rules=False,
+    )
+    decrypt_cnotes = PythonOperator(
+        task_id="decrypt_cnotes",
+        python_callable=task_decrypt_cnotes,
+    )
+    cnotes_init = PythonOperator(
+        task_id="cnotes_init",
+        python_callable=task_cnotes_init,
+    )
+    clinicalbin_deid = PythonOperator(
+        task_id="clinicalbin_deid",
+        python_callable=task_clinicalbin_deid,
+        execution_timeout=None,
+    )
+    cnotes_status = PythonOperator(
+        task_id="cnotes_status",
+        python_callable=task_cnotes_status,
+    )
+    cnotes_merge = PythonOperator(
+        task_id="cnotes_merge",
+        python_callable=task_cnotes_merge,
+    )
+    cnotes_s3_upload = PythonOperator(
+        task_id="cnotes_s3_upload",
+        python_callable=task_cnotes_s3_upload,
+    )
+    cnotes_s3_count = PythonOperator(
+        task_id="cnotes_s3_count",
+        python_callable=task_cnotes_s3_count,
+    )
+    cnotes_s3_delete = PythonOperator(
+        task_id="cnotes_s3_delete",
+        python_callable=task_cnotes_s3_delete,
+    )
 
-    # Cleanup only after merge (s3_transfer runs independently in parallel)
-    merge_deid_data >> delete_original_diffmerged
+    # Self-contained cnotes lifecycle (gated)
+    cnotes_gate >> decrypt_cnotes >> cnotes_init >> clinicalbin_deid >> cnotes_status >> cnotes_merge \
+        >> cnotes_s3_upload >> cnotes_s3_count >> cnotes_s3_delete
+
+    if _CNOTES_FIRST:
+        # Run cnotes early: gate after restore (parallel to diff+merge), clinicalbin
+        # deid after mapping is ready, and gate the main deid on the cnotes chain
+        # finishing (init_deid_state uses NONE_FAILED_MIN_ONE_SUCCESS so a skip is ok).
+        restore >> cnotes_gate
+        validate_mapping >> clinicalbin_deid
+        cnotes_s3_delete >> init_deid_state
+    else:
+        # Default: whole cnotes chain runs after the main pipeline's S3 delete.
+        # (validate_mapping is already satisfied transitively via s3_delete.)
+        s3_delete >> cnotes_gate

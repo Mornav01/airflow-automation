@@ -4,12 +4,12 @@ import logging
 import os
 import subprocess
 import tempfile
-import urllib.parse
 from datetime import datetime, timedelta
 from typing import Any
 
 import pendulum
 import requests
+
 
 from airflow import DAG
 from airflow.providers.standard.operators.bash import BashOperator

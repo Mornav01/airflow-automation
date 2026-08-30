@@ -104,6 +104,7 @@ with DAG(
     params={
         "config_yaml":     _DEFAULT_CONFIG,
         "tables_filepath": _DEFAULT_TABLES,
+        "deid_status_max_workers": 8,
     },
 ) as dag:
 
@@ -113,11 +114,14 @@ with DAG(
 
         script_path = os.path.join(_SCRIPTS_DIR, "state_deid_status_check_v2.py")
 
+        # v3 status-check uses mssql+pymssql; run under the Airflow interpreter
+        # (air_env has pymssql), not DEID_PYTHON (new_deid = deid-only).
         cmd = [
-            DEID_PYTHON,
+            sys.executable,
             script_path,
             "--config-yaml",     params["config_yaml"],
             "--tables-filepath", params["tables_filepath"],
+            "--max-workers",     str(params.get("deid_status_max_workers", 8)),
         ]
 
         result = subprocess.run(

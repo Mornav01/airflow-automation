@@ -32,6 +32,8 @@ config_key: clinicalbin_incremental
 # ── State Storage ────────────────────────────────────────────────────
 state_db_path: ${LOG_DIR}/clinicalbin_state.db
 failed_rows_db_path: ${LOG_DIR}/clinicalbin_failed_rows.db
+state_db_name: deid_state
+failed_rows_db_name: deid_failed
 
 # ── Redis ────────────────────────────────────────────────────────────
 redis_url: redis://${DB_HOST}:6379/0
@@ -65,6 +67,7 @@ workers:
   processors: 4
   max_retries: 1
   task_timeout: 3600
+  table_batch_size: 5   # 5 tables at a time → max 7 workers
 
 # ── Logging ──────────────────────────────────────────────────────────
 logging:
@@ -77,8 +80,8 @@ qc:
 
 # ── PII / Notes Config ───────────────────────────────────────────────
 pii_db:
-  master_connection_str: "mysql+pymysql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${MASTER_DB_NAME}"
-  secondary_pii_connection_str: "mysql+pymysql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${MASTER_DB_NAME}"
+  master_db_name: ${MASTER_DB_NAME}
+  secondary_pii_db_name: ${MASTER_DB_NAME}
 
 secondary_pii_config_path: ${SECONDARY_PII_YAML}
 pii_config_path: ${PII_YAML}
