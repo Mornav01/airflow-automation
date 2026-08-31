@@ -257,6 +257,36 @@ def task_validate_mapping(**_):
         raise RuntimeError(f"Mapping pipeline failed or stale. Components: {', '.join(failed)}")
 
 
+def task_ignore_rows_gate(**context):
+    """ShortCircuit gate: skip ignore-rows reconciliation when skip_ignore_rows=True.
+
+    Used with ignore_downstream_trigger_rules=False so a skip doesn't force-skip
+    tasks past a trigger-rule boundary — init_deid_state is set to NONE_FAILED in
+    both DAGs specifically so it tolerates ignore_rows_run being skipped here."""
+    if context["params"].get("skip_ignore_rows", False):
+        logger.info("skip_ignore_rows=True — skipping ignore-rows reconciliation")
+        return False
+    logger.info("Running ignore-rows reconciliation")
+    return True
+
+
+def task_run_ignore_rows(**context):
+    """Reconcile rows the deid engine silently dropped for lack of mapping data
+    (scripts/ignore_rows_run.py: fill IGNORE_ROWS_DB_NAME, then re-copy pending
+    rows into MERGED_DB_NAME). Runs under _deid_python() — it imports
+    merge_engine.py (pandas), same as state_diff_merge_v3.py/state_deid_merge.py."""
+    params = context["params"]
+    script = os.path.join(_SCRIPTS_DIR, "ignore_rows_run.py")
+    cmd = [
+        _deid_python(), script,
+        "--tables_csv",  params["deid_tables_csv"],
+        "--max_workers", str(params.get("ignore_rows_max_workers", 8)),
+    ]
+    rc, out = _run_streaming(cmd)
+    if rc != 0:
+        raise RuntimeError(f"ignore rows reconciliation failed (rc={rc}):\n{out[-4000:]}")
+
+
 def task_init_deid_state(**context):
     params = context["params"]
     script = os.path.join(_SCRIPTS_DIR, "state_deid_init_v2.py")

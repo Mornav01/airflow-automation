@@ -85,6 +85,7 @@ _MASTER_DB_NAME  = os.environ.get("MASTER_DB_NAME", "master")
 _DEID_BASE_NAME    = os.environ.get("DEID_BASE_NAME", "deidentified")
 _DEID_STAGING_NAME = os.environ.get("DEID_STAGING_NAME", "deidentified_staging")
 _DEID_MERGED_NAME  = os.environ.get("DEID_MERGED_NAME", "deidentified_merged")
+_IGNORE_ROWS_DB_NAME = os.environ.get("IGNORE_ROWS_DB_NAME", "")
 
 # ODBC driver name — configurable per machine (installs vary: Driver 17 vs 18).
 # Set ODBC_DRIVER in .env to override. `odbcinst -q -d` lists installed drivers.
@@ -105,6 +106,7 @@ BASE_DB         = make_conn_url("mssql+pyodbc", username=_SOURCE_USER, password=
 PROD_DB         = make_conn_url("mssql+pyodbc", username=_PROD_USER, password=_PROD_PW, host=_PROD_HOST, port=_PROD_PORT, database=_PROD_DB_NAME, query=_ODBC_QUERY)
 DIFF_STAGING_DB = make_conn_url("mssql+pyodbc", username=_SOURCE_USER, password=_SOURCE_PW, host=_SOURCE_HOST, port=_SOURCE_PORT, database=_STAGING_DB_NAME, query=_ODBC_QUERY)
 DIFFMERGED_CONN = make_conn_url("mssql+pyodbc", username=_SOURCE_USER, password=_SOURCE_PW, host=_SOURCE_HOST, port=_SOURCE_PORT, database=_MERGED_DB_NAME, query=_ODBC_QUERY)
+IGNORE_ROWS_DB  = make_conn_url("mssql+pyodbc", username=_SOURCE_USER, password=_SOURCE_PW, host=_SOURCE_HOST, port=_SOURCE_PORT, database=_IGNORE_ROWS_DB_NAME, query=_ODBC_QUERY)
 
 DB_TYPE     = "mssql"
 DIFF_SCHEMA = "dbo"

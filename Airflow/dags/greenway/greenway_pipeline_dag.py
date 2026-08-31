@@ -35,10 +35,12 @@ from shared.tasks import (  # noqa: E402
     task_cnotes_s3_upload,
     task_cnotes_status,
     task_delete_diffmerged,
+    task_ignore_rows_gate,
     task_init_deid_state,
     task_merge_deid_data,
     task_run_deid,
     task_run_diff_merge,
+    task_run_ignore_rows,
     task_s3_gate,
     task_s3_upload,
     task_s3_count,
@@ -182,11 +184,13 @@ with DAG(
         "skip_diff_merge":         _CLIENT_CFG.get("skip_diff_merge", False),
         "stop_after_diff_merge":   _CLIENT_CFG.get("stop_after_diff_merge", False),
         "skip_s3_upload":          _CLIENT_CFG.get("skip_s3_upload", False),
+        "skip_ignore_rows":        _CLIENT_CFG.get("skip_ignore_rows", False),
         "diff_merge_max_workers":  _CLIENT_CFG.get("diff_merge_max_workers", 16),
         "deid_init_max_workers":   _CLIENT_CFG.get("deid_init_max_workers", 16),
         "deid_status_max_workers": _CLIENT_CFG.get("deid_status_max_workers", 8),
         "deid_merge_max_workers":  _CLIENT_CFG.get("deid_merge_max_workers", 8),
         "deid_delete_max_workers": _CLIENT_CFG.get("deid_delete_max_workers", 8),
+        "ignore_rows_max_workers": _CLIENT_CFG.get("ignore_rows_max_workers", 8),
     },
 ) as dag:
 
@@ -239,13 +243,35 @@ with DAG(
         trigger_rule=TriggerRule.ALL_DONE,
     )
 
+    # UI-toggleable gate (skip_ignore_rows) to skip ignore-rows reconciliation;
+    # mirrors the s3_gate/cnotes_gate pattern. This gate — not init_deid_state —
+    # carries the cnotes-first-mode AND/OR-join logic that used to live directly
+    # on init_deid_state, because init_deid_state now has exactly ONE upstream
+    # (ignore_rows_run): NONE_FAILED_MIN_ONE_SUCCESS auto-skips whenever its
+    # upstream count equals its skipped count, which is always true with a
+    # single upstream — so that join logic only works correctly here, where the
+    # gate can have two upstreams (validate_mapping + cnotes_s3_delete) in
+    # cnotes-first mode.
+    ignore_rows_gate = ShortCircuitOperator(
+        task_id="ignore_rows_gate",
+        python_callable=task_ignore_rows_gate,
+        ignore_downstream_trigger_rules=False,
+        trigger_rule=(TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS if _CNOTES_FIRST
+                      else TriggerRule.ALL_SUCCESS),
+    )
+
+    ignore_rows_run = PythonOperator(
+        task_id="ignore_rows_run",
+        python_callable=task_run_ignore_rows,
+    )
+
+    # init_deid_state's sole upstream is now ignore_rows_run — NONE_FAILED
+    # (not ALL_SUCCESS) so a skip_ignore_rows=True skip doesn't cascade-skip
+    # the rest of the pipeline (see ignore_rows_gate's comment above).
     init_deid_state = PythonOperator(
         task_id="init_deid_state",
         python_callable=task_init_deid_state,
-        # In cnotes-first mode the cnotes tail feeds this task; tolerate a skipped
-        # (not failed) cnotes chain so a runtime skip_cnotes still lets deid proceed.
-        trigger_rule=(TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS if _CNOTES_FIRST
-                      else TriggerRule.ALL_SUCCESS),
+        trigger_rule=TriggerRule.NONE_FAILED,
     )
 
     run_deid = PythonOperator(
@@ -302,9 +328,11 @@ with DAG(
     run_diff_merge >> validate_diff_merge >> check_continue >> [mapping_update, pii_data, master_insurance]
     [mapping_update, pii_data, master_insurance] >> validate_mapping
 
-    # validate mapping → init deid state → run deid → status check →
-    # merge → trim original diff-merged → STAGE 5: s3 upload → count → delete.
-    validate_mapping >> init_deid_state >> run_deid >> check_deid_status
+    # validate mapping → ignore-rows reconciliation (gated) → init deid state →
+    # run deid → status check → merge → trim original diff-merged →
+    # STAGE 5: s3 upload → count → delete.
+    validate_mapping >> ignore_rows_gate >> ignore_rows_run >> init_deid_state
+    init_deid_state >> run_deid >> check_deid_status
     # s3_gate (skip_s3_upload UI toggle) can skip the whole upload/count/delete stage.
     check_deid_status >> merge_deid_data >> delete_original_diffmerged >> s3_gate
     s3_gate >> s3_upload >> s3_count >> s3_delete
@@ -319,7 +347,7 @@ with DAG(
     cnotes_gate = ShortCircuitOperator(
         task_id="cnotes_gate",
         python_callable=task_cnotes_gate,
-        # Don't force-skip past trigger-rule boundaries (init_deid_state in first mode).
+        # Don't force-skip past trigger-rule boundaries (ignore_rows_gate in first mode).
         ignore_downstream_trigger_rules=False,
         # Default mode's upstream is s3_delete, which is SKIPPED (not failed) when
         # skip_s3_upload=True — tolerate that so cnotes still runs on its own merit.
@@ -366,10 +394,11 @@ with DAG(
     if _CNOTES_FIRST:
         # Run cnotes early: gate after restore (parallel to diff+merge), clinicalbin
         # deid after mapping is ready, and gate the main deid on the cnotes chain
-        # finishing (init_deid_state uses NONE_FAILED_MIN_ONE_SUCCESS so a skip is ok).
+        # finishing — feeds ignore_rows_gate (not init_deid_state directly; see its
+        # NONE_FAILED_MIN_ONE_SUCCESS trigger rule, which needs 2 upstreams to work).
         restore >> cnotes_gate
         validate_mapping >> clinicalbin_deid
-        cnotes_s3_delete >> init_deid_state
+        cnotes_s3_delete >> ignore_rows_gate
     else:
         # Default: whole cnotes chain runs after the main pipeline's S3 delete.
         # (validate_mapping is already satisfied transitively via s3_delete.)

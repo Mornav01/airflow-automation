@@ -77,6 +77,51 @@ class AddNdColumns:
                 return
             conn.execute(text(f"ALTER TABLE {table} ADD {column} {ddl_type}"))
 
+    # ── Dialect helpers ────────────────────────────────────────────────────────
+    #
+    # CONNECTION_STRING's SQLAlchemy prefix (mssql+.../mysql+...) determines the
+    # dialect; engine.dialect.name reflects it without any extra round trip.
+    # MSSQL and MySQL diverge on: batch-limiting a bare UPDATE (TOP vs LIMIT),
+    # NULL-coalescing (ISNULL vs COALESCE, so we use the ANSI-standard COALESCE
+    # which both support), and UPDATE-with-row-numbering (MSSQL can UPDATE
+    # through a ROW_NUMBER() CTE; MySQL forbids updating a table referenced in
+    # its own subquery, so row numbers come from a session variable instead).
+
+    @staticmethod
+    def _is_mysql(engine) -> bool:
+        return engine.dialect.name == "mysql"
+
+    @classmethod
+    def _batch_update(cls, engine, table: str, where_column: str, set_sql: str,
+                       params: dict | None = None) -> int:
+        """
+        Runs UPDATE {table} SET {set_sql} WHERE {where_column} IS NULL in
+        batches of BATCH_SIZE, committing each batch, until no rows remain.
+        Returns total rows updated.
+        """
+        params = params or {}
+        is_mysql = cls._is_mysql(engine)
+        total = 0
+        while True:
+            with engine.begin() as conn:
+                if is_mysql:
+                    n = conn.execute(text(f"""
+                        UPDATE {table}
+                        SET {set_sql}
+                        WHERE {where_column} IS NULL
+                        LIMIT :batch
+                    """), {**params, "batch": BATCH_SIZE}).rowcount
+                else:
+                    n = conn.execute(text(f"""
+                        UPDATE TOP (:batch) {table}
+                        SET {set_sql}
+                        WHERE {where_column} IS NULL
+                    """), {**params, "batch": BATCH_SIZE}).rowcount
+            total += n
+            if n < BATCH_SIZE:
+                break
+        return total
+
     # ── The three operations ───────────────────────────────────────────────────
     #
     # Each op ADDs the column (idempotent) then POPULATEs the still-NULL rows in
@@ -97,21 +142,33 @@ class AddNdColumns:
 
         with engine.begin() as conn:
             offset = conn.execute(
-                text(f"SELECT ISNULL(MAX(nd_auto_increment_id), 0) FROM {table}")
+                text(f"SELECT COALESCE(MAX(nd_auto_increment_id), 0) FROM {table}")
             ).scalar() or 0
 
+        is_mysql = cls._is_mysql(engine)
         total = 0
         while True:
             with engine.begin() as conn:
-                n = conn.execute(text(f"""
-                    WITH cte AS (
-                        SELECT TOP (:batch) nd_auto_increment_id,
-                               ROW_NUMBER() OVER (ORDER BY (SELECT 1)) rn
-                        FROM {table}
+                if is_mysql:
+                    # No CTE/derived-table UPDATE of the same table in MySQL —
+                    # number rows via a session variable instead.
+                    conn.execute(text("SET @nd_rownum := :offset"), {"offset": int(offset)})
+                    n = conn.execute(text(f"""
+                        UPDATE {table}
+                        SET nd_auto_increment_id = (@nd_rownum := @nd_rownum + 1)
                         WHERE nd_auto_increment_id IS NULL
-                    )
-                    UPDATE cte SET nd_auto_increment_id = :offset + rn
-                """), {"batch": BATCH_SIZE, "offset": int(offset)}).rowcount
+                        LIMIT :batch
+                    """), {"batch": BATCH_SIZE}).rowcount
+                else:
+                    n = conn.execute(text(f"""
+                        WITH cte AS (
+                            SELECT TOP (:batch) nd_auto_increment_id,
+                                   ROW_NUMBER() OVER (ORDER BY (SELECT 1)) rn
+                            FROM {table}
+                            WHERE nd_auto_increment_id IS NULL
+                        )
+                        UPDATE cte SET nd_auto_increment_id = :offset + rn
+                    """), {"batch": BATCH_SIZE, "offset": int(offset)}).rowcount
             offset += n
             total += n
             if n < BATCH_SIZE:
@@ -126,17 +183,10 @@ class AddNdColumns:
         """
         cls._add_column_if_missing(engine, table, "nd_extracted_date", "DATETIME")
 
-        total = 0
-        while True:
-            with engine.begin() as conn:
-                n = conn.execute(text(f"""
-                    UPDATE TOP (:batch) {table}
-                    SET nd_extracted_date = :d
-                    WHERE nd_extracted_date IS NULL
-                """), {"batch": BATCH_SIZE, "d": DEFAULT_DATE}).rowcount
-            total += n
-            if n < BATCH_SIZE:
-                break
+        total = cls._batch_update(
+            engine, table, "nd_extracted_date",
+            "nd_extracted_date = :d", {"d": DEFAULT_DATE},
+        )
         print(f"         nd_extracted_date populated with '{DEFAULT_DATE}' ({total:,} rows).")
 
     @classmethod
@@ -147,17 +197,9 @@ class AddNdColumns:
         """
         cls._add_column_if_missing(engine, table, "nd_ActiveFlag", "CHAR(1)")
 
-        total = 0
-        while True:
-            with engine.begin() as conn:
-                n = conn.execute(text(f"""
-                    UPDATE TOP (:batch) {table}
-                    SET nd_ActiveFlag = 'Y'
-                    WHERE nd_ActiveFlag IS NULL
-                """), {"batch": BATCH_SIZE}).rowcount
-            total += n
-            if n < BATCH_SIZE:
-                break
+        total = cls._batch_update(
+            engine, table, "nd_ActiveFlag", "nd_ActiveFlag = 'Y'",
+        )
         print(f"         nd_ActiveFlag set to 'Y' ({total:,} rows).")
 
     # ── Per-table runner ───────────────────────────────────────────────────────

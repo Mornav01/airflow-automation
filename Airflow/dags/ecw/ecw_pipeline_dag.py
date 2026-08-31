@@ -27,10 +27,12 @@ from shared.tasks import (  # noqa: E402
     task_check_continue,
     task_check_deid_status,
     task_delete_diffmerged,
+    task_ignore_rows_gate,
     task_init_deid_state,
     task_merge_deid_data,
     task_run_deid,
     task_run_diff_merge,
+    task_run_ignore_rows,
     task_s3_gate,
     task_s3_upload,
     task_s3_count,
@@ -172,11 +174,13 @@ with DAG(
         "skip_diff_merge":         _CLIENT_CFG.get("skip_diff_merge", False),
         "stop_after_diff_merge":   _CLIENT_CFG.get("stop_after_diff_merge", False),
         "skip_s3_upload":          _CLIENT_CFG.get("skip_s3_upload", False),
+        "skip_ignore_rows":        _CLIENT_CFG.get("skip_ignore_rows", False),
         "diff_merge_max_workers":  _CLIENT_CFG.get("diff_merge_max_workers", 16),
         "deid_init_max_workers":   _CLIENT_CFG.get("deid_init_max_workers", 16),
         "deid_status_max_workers": _CLIENT_CFG.get("deid_status_max_workers", 8),
         "deid_merge_max_workers":  _CLIENT_CFG.get("deid_merge_max_workers", 8),
         "deid_delete_max_workers": _CLIENT_CFG.get("deid_delete_max_workers", 8),
+        "ignore_rows_max_workers": _CLIENT_CFG.get("ignore_rows_max_workers", 8),
     },
 ) as dag:
 
@@ -233,11 +237,29 @@ with DAG(
         trigger_rule=TriggerRule.ALL_DONE,
     )
 
+    # UI-toggleable gate (skip_ignore_rows) to skip ignore-rows reconciliation;
+    # mirrors the s3_gate/cnotes_gate pattern. ignore_downstream_trigger_rules=False
+    # so a skip doesn't force-skip past init_deid_state's trigger-rule boundary.
+    ignore_rows_gate = ShortCircuitOperator(
+        task_id="ignore_rows_gate",
+        python_callable=task_ignore_rows_gate,
+        ignore_downstream_trigger_rules=False,
+    )
+
+    ignore_rows_run = PythonOperator(
+        task_id="ignore_rows_run",
+        python_callable=task_run_ignore_rows,
+    )
+
     # init_deid_state fans in from both validate_mapping (mapping branch) and
-    # decrypt_pnotes so deid never starts until mapping tables AND pnotes are ready.
+    # decrypt_pnotes, via ignore_rows_gate/ignore_rows_run, so deid never starts
+    # until mapping tables AND pnotes are ready. NONE_FAILED (not the default
+    # ALL_SUCCESS) so a skip_ignore_rows=True skip of its sole upstream
+    # (ignore_rows_run) doesn't cascade-skip the rest of the pipeline.
     init_deid_state = PythonOperator(
         task_id="init_deid_state",
         python_callable=task_init_deid_state,
+        trigger_rule=TriggerRule.NONE_FAILED,
     )
 
     run_deid = PythonOperator(
@@ -295,8 +317,9 @@ with DAG(
     # Mapping branch: validate once all three mapping tasks finish
     [mapping_update, pii_data, master_insurance] >> validate_mapping
 
-    # deid init waits for mapping validation AND pnotes decryption
-    [validate_mapping, decrypt_pnotes] >> init_deid_state
+    # deid init waits for mapping validation AND pnotes decryption, with an
+    # ignore-rows reconciliation pass (gated, skippable) in between.
+    [validate_mapping, decrypt_pnotes] >> ignore_rows_gate >> ignore_rows_run >> init_deid_state
 
     init_deid_state >> run_deid >> check_deid_status
 

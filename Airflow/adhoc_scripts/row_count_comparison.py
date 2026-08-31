@@ -1,43 +1,44 @@
 """
-Row count comparison between MSSQL (source) and MySQL (deidentified) for a given set of tables.
+Row count comparison between two databases for a given set of tables.
+Source and dest can each independently be MSSQL or MySQL (mssql-mssql,
+mysql-mysql, or mssql-mysql in either direction) — the dialect is detected
+from each connection's engine, so identifier quoting is picked automatically.
 
 Usage:
-    python row_count_comparison.py <path_to_csv>
+    python row_count_comparison.py [path_to_csv] [--source-conn URL] [--dest-conn URL] [--output-csv PATH]
 
 CSV format: one table name per row (header optional, first column used).
 
-Output: row_count_stats_<timestamp>.csv written to the same folder as this script.
+Config is read from Airflow/.env (see .env.example): path_to_csv defaults to
+ROWCOUNT_TABLES_CSV, connection strings default to ROWCOUNT_SOURCE_CONN /
+ROWCOUNT_DEST_CONN, and the output CSV path defaults to ROWCOUNT_OUTPUT_CSV
+(or row_count_stats.csv next to this script).
 """
 
-import sys
+import argparse
 import csv
 import os
-from datetime import datetime
 from pathlib import Path
 
 import sqlalchemy
-
-MSSQL_CONN = os.environ.get("MSSQL_CONN", "")
-MYSQL_CONN = os.environ.get("MYSQL_CONN", "")
+from dotenv import load_dotenv
 
 SCRIPT_DIR = Path(__file__).parent
 
+load_dotenv(SCRIPT_DIR.parent / ".env")
 
-def get_row_count_mssql(engine, table_name: str) -> int | None:
+# Dialects that quote identifiers with brackets instead of backticks.
+BRACKET_DIALECTS = {"mssql"}
+
+
+def get_row_count(engine, table_name: str) -> int | None:
+    quote = "[{}]" if engine.dialect.name in BRACKET_DIALECTS else "`{}`"
     try:
         with engine.connect() as conn:
-            result = conn.execute(sqlalchemy.text(f"SELECT COUNT(*) FROM [{table_name}]"))
+            result = conn.execute(sqlalchemy.text(f"SELECT COUNT(*) FROM {quote.format(table_name)}"))
             return result.scalar()
-    except Exception:
-        return None
-
-
-def get_row_count_mysql(engine, table_name: str) -> int | None:
-    try:
-        with engine.connect() as conn:
-            result = conn.execute(sqlalchemy.text(f"SELECT COUNT(*) FROM `{table_name}`"))
-            return result.scalar()
-    except Exception:
+    except Exception as e:
+        print(f"\n    [{engine.dialect.name}] error counting `{table_name}`: {e}")
         return None
 
 
@@ -58,53 +59,72 @@ def load_tables_from_csv(csv_path: str) -> list[str]:
     return tables
 
 
+def make_engine(conn_str: str, label: str):
+    if not conn_str:
+        print(f"No connection string provided for {label} (set ROWCOUNT_{label.upper()}_CONN or pass --{label}-conn).")
+        raise SystemExit(1)
+    engine = sqlalchemy.create_engine(conn_str)
+    print(f"Connecting to {label} ({engine.dialect.name})...")
+    return engine
+
+
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python row_count_comparison.py <path_to_csv>")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Compare row counts between two databases (any mix of MSSQL/MySQL)")
+    parser.add_argument(
+        "csv_path",
+        nargs="?",
+        default=os.environ.get("ROWCOUNT_TABLES_CSV", ""),
+        help="Path to CSV of table names",
+    )
+    parser.add_argument("--source-conn", default=os.environ.get("ROWCOUNT_SOURCE_CONN", ""), help="SQLAlchemy URL for source DB")
+    parser.add_argument("--dest-conn", default=os.environ.get("ROWCOUNT_DEST_CONN", ""), help="SQLAlchemy URL for dest DB")
+    parser.add_argument(
+        "--output-csv",
+        default=os.environ.get("ROWCOUNT_OUTPUT_CSV") or str(SCRIPT_DIR / "row_count_stats.csv"),
+        help="Path to write the output CSV",
+    )
+    args = parser.parse_args()
 
-    csv_path = sys.argv[1]
-    if not os.path.exists(csv_path):
-        print(f"CSV file not found: {csv_path}")
-        sys.exit(1)
+    if not args.csv_path:
+        print("No CSV path provided (set ROWCOUNT_TABLES_CSV in manual.env or pass it as an argument).")
+        raise SystemExit(1)
+    if not os.path.exists(args.csv_path):
+        print(f"CSV file not found: {args.csv_path}")
+        raise SystemExit(1)
 
-    tables = load_tables_from_csv(csv_path)
+    tables = load_tables_from_csv(args.csv_path)
     if not tables:
         print("No tables found in CSV.")
-        sys.exit(1)
+        raise SystemExit(1)
 
-    print(f"Loaded {len(tables)} tables from {csv_path}")
-    print("Connecting to MSSQL...")
-    mssql_engine = sqlalchemy.create_engine(MSSQL_CONN, fast_executemany=True)
-    print("Connecting to MySQL...")
-    mysql_engine = sqlalchemy.create_engine(MYSQL_CONN)
+    print(f"Loaded {len(tables)} tables from {args.csv_path}")
+    source_engine = make_engine(args.source_conn, "source")
+    dest_engine = make_engine(args.dest_conn, "dest")
 
     rows = []
     for table in tables:
         print(f"  Counting: {table}", end=" ... ", flush=True)
-        mssql_count = get_row_count_mssql(mssql_engine, table)
-        mysql_count = get_row_count_mysql(mysql_engine, table)
+        source_count = get_row_count(source_engine, table)
+        dest_count = get_row_count(dest_engine, table)
 
-        if mssql_count is None or mysql_count is None:
+        if source_count is None or dest_count is None:
             match = "ERROR"
-        elif mssql_count == mysql_count:
+        elif source_count == dest_count:
             match = "OK"
         else:
             match = "MISMATCH"
 
-        print(f"MSSQL={mssql_count}  MySQL={mysql_count}  [{match}]")
+        print(f"source={source_count}  dest={dest_count}  [{match}]")
         rows.append({
             "table": table,
-            "mssql_count": mssql_count if mssql_count is not None else "ERROR",
-            "mysql_count": mysql_count if mysql_count is not None else "ERROR",
+            "source_count": source_count if source_count is not None else "ERROR",
+            "dest_count": dest_count if dest_count is not None else "ERROR",
             "match": match,
         })
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_path = SCRIPT_DIR / f"row_count_stats_{timestamp}.csv"
-
+    out_path = Path(args.output_csv)
     with open(out_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=["table", "mssql_count", "mysql_count", "match"])
+        writer = csv.DictWriter(f, fieldnames=["table", "source_count", "dest_count", "match"])
         writer.writeheader()
         writer.writerows(rows)
 
